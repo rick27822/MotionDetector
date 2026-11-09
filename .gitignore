@@ -1,6 +1,15 @@
 build/
+build-*/
+.vs/
+debug/
+release/
+Makefile*
+.qmake.stash
 *.exe
 *.o
 *.obj
+*.pdb
+*.ilk
+*.idb
 *.user
 data/
