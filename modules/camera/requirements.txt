@@ -1,0 +1,7 @@
+numpy>=1.26,<3
+opencv-python>=4.10,<6
+Pillow>=10,<13
+aiohttp>=3.10,<4
+aiortc>=1.10,<2
+cryptography>=44,<51
+qrcode[pil]>=8,<9

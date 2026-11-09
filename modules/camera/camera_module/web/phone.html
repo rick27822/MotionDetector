@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PoseLab · 手机采集</title><link rel="stylesheet" href="/phone.css"><script src="/phone.js" defer></script></head>
+<body><main>
+  <header><span class="logo">P</span><div><b>PoseLab</b><small>手机摄像头采集</small></div><span id="badge">未连接</span></header>
+  <h1>让手机成为你的摄像头</h1><p class="intro">与电脑连接同一 Wi-Fi，允许摄像头权限后开始采集。画面传输到配对的电脑。</p>
+  <div class="view"><video id="preview" autoplay playsinline muted></video><span class="view-label">本机预览</span></div>
+  <div class="fields"><label>镜头<select id="facing"><option value="environment">后置摄像头</option><option value="user">前置摄像头</option></select></label><label>采集质量<select id="quality"><option value="720">720P · 30 帧目标</option><option value="1080">1080P · 30 帧目标</option><option value="480">480P · 20 帧目标</option></select></label></div>
+  <label class="toggle"><input type="checkbox" id="adaptive" checked>网络不稳定时尝试降低采集质量</label>
+  <div class="actions"><button id="start">开始采集</button><button id="stop" disabled>停止</button></div>
+  <p id="status" role="status" aria-live="polite">准备连接</p><p id="details" class="details">开始后显示实际采集尺寸</p>
+  <details><summary>连接遇到问题</summary><p>请使用手机系统浏览器。手机和电脑应处于同一局域网；需要在手机上安装并信任电脑生成的本地证书。步骤见项目 README 的“手机接入”。</p><p>如已连接但电脑没有画面，检查防火墙是否允许 Python 在专用网络通信，以及 Wi-Fi 是否开启了客户端隔离。手机锁屏或页面切到后台可能暂停摄像头。</p></details>
+</main></body></html>
