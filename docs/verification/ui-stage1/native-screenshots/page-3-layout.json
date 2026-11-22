@@ -1,0 +1,298 @@
+[
+    {
+        "class": "ui::Sidebar",
+        "h": 900,
+        "name": "sidebar",
+        "w": 225,
+        "x": 0,
+        "y": 0
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 58
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 96
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 134
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 172
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 210
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 248
+    },
+    {
+        "class": "QFrame",
+        "h": 58,
+        "name": "subcard",
+        "w": 193,
+        "x": 16,
+        "y": 826
+    },
+    {
+        "class": "QWidget",
+        "h": 48,
+        "name": "topbar",
+        "w": 1215,
+        "x": 225,
+        "y": 0
+    },
+    {
+        "class": "QPushButton",
+        "h": 28,
+        "name": "scenarioMenu",
+        "w": 75,
+        "x": 1353,
+        "y": 10
+    },
+    {
+        "class": "QStackedWidget",
+        "h": 852,
+        "name": "pages",
+        "w": 1215,
+        "x": 225,
+        "y": 48
+    },
+    {
+        "class": "ui::DetectionConfigPage",
+        "h": 852,
+        "name": "page",
+        "w": 1215,
+        "x": 225,
+        "y": 48
+    },
+    {
+        "class": "QWidget",
+        "h": 852,
+        "name": "qt_scrollarea_viewport",
+        "w": 1215,
+        "x": 225,
+        "y": 48
+    },
+    {
+        "class": "QPushButton",
+        "h": 65,
+        "name": "model",
+        "w": 381,
+        "x": 249,
+        "y": 109
+    },
+    {
+        "class": "QPushButton",
+        "h": 65,
+        "name": "model",
+        "w": 381,
+        "x": 642,
+        "y": 109
+    },
+    {
+        "class": "QPushButton",
+        "h": 65,
+        "name": "model",
+        "w": 381,
+        "x": 1035,
+        "y": 109
+    },
+    {
+        "class": "QFrame",
+        "h": 229,
+        "name": "card",
+        "w": 767,
+        "x": 249,
+        "y": 194
+    },
+    {
+        "class": "QSlider",
+        "h": 14,
+        "name": "confidenceSlider",
+        "w": 727,
+        "x": 269,
+        "y": 262
+    },
+    {
+        "class": "QSlider",
+        "h": 14,
+        "name": "nmsSlider",
+        "w": 727,
+        "x": 269,
+        "y": 307
+    },
+    {
+        "class": "QSlider",
+        "h": 14,
+        "name": "smoothingSlider",
+        "w": 727,
+        "x": 269,
+        "y": 353
+    },
+    {
+        "class": "ui::ToggleField",
+        "h": 18,
+        "name": "interpolateMissing",
+        "w": 30,
+        "x": 966,
+        "y": 382
+    },
+    {
+        "class": "QFrame",
+        "h": 161,
+        "name": "card",
+        "w": 380,
+        "x": 1036,
+        "y": 194
+    },
+    {
+        "class": "QPushButton",
+        "h": 26,
+        "name": "chip",
+        "w": 46,
+        "x": 1056,
+        "y": 239
+    },
+    {
+        "class": "QPushButton",
+        "h": 26,
+        "name": "chip",
+        "w": 46,
+        "x": 1109,
+        "y": 239
+    },
+    {
+        "class": "QPushButton",
+        "h": 26,
+        "name": "chip",
+        "w": 46,
+        "x": 1162,
+        "y": 239
+    },
+    {
+        "class": "QPushButton",
+        "h": 26,
+        "name": "chip",
+        "w": 46,
+        "x": 1215,
+        "y": 239
+    },
+    {
+        "class": "QPushButton",
+        "h": 26,
+        "name": "chip",
+        "w": 46,
+        "x": 1268,
+        "y": 239
+    },
+    {
+        "class": "QPushButton",
+        "h": 26,
+        "name": "chip",
+        "w": 46,
+        "x": 1321,
+        "y": 239
+    },
+    {
+        "class": "QPushButton",
+        "h": 26,
+        "name": "chip",
+        "w": 46,
+        "x": 1056,
+        "y": 273
+    },
+    {
+        "class": "QPushButton",
+        "h": 26,
+        "name": "chip",
+        "w": 46,
+        "x": 1109,
+        "y": 273
+    },
+    {
+        "class": "QPushButton",
+        "h": 26,
+        "name": "chip",
+        "w": 46,
+        "x": 1162,
+        "y": 273
+    },
+    {
+        "class": "QPushButton",
+        "h": 26,
+        "name": "chip",
+        "w": 46,
+        "x": 1215,
+        "y": 273
+    },
+    {
+        "class": "QPushButton",
+        "h": 26,
+        "name": "chip",
+        "w": 46,
+        "x": 1268,
+        "y": 273
+    },
+    {
+        "class": "QPushButton",
+        "h": 26,
+        "name": "chip",
+        "w": 46,
+        "x": 1321,
+        "y": 273
+    },
+    {
+        "class": "QPushButton",
+        "h": 28,
+        "name": "noseUnavailable",
+        "w": 107,
+        "x": 1056,
+        "y": 308
+    },
+    {
+        "class": "QPushButton",
+        "h": 34,
+        "name": "resetPoseConfig",
+        "w": 81,
+        "x": 1234,
+        "y": 443
+    },
+    {
+        "class": "QPushButton",
+        "h": 34,
+        "name": "savePoseConfig",
+        "w": 81,
+        "x": 1335,
+        "y": 443
+    }
+]

@@ -1,0 +1,7 @@
+Test project /Users/cherry/Desktop/project/motionDetecter/motiondetecter/build-ui-qt611
+    Start 1: ui_contracts
+1/1 Test #1: ui_contracts .....................   Passed    3.58 sec
+
+100% tests passed out of 1
+
+Total Test time (real) =   3.59 sec

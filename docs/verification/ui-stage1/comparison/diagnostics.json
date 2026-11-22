@@ -1,0 +1,32 @@
+[
+  {
+    "page": 1,
+    "mean_absolute_channel_error": 8.385,
+    "note": "Diagnostic only; changed semantics, sample values and video content are not matched."
+  },
+  {
+    "page": 2,
+    "mean_absolute_channel_error": 3.854,
+    "note": "Diagnostic only; changed semantics, sample values and video content are not matched."
+  },
+  {
+    "page": 3,
+    "mean_absolute_channel_error": 3.838,
+    "note": "Diagnostic only; changed semantics, sample values and video content are not matched."
+  },
+  {
+    "page": 4,
+    "mean_absolute_channel_error": 4.92,
+    "note": "Diagnostic only; changed semantics, sample values and video content are not matched."
+  },
+  {
+    "page": 5,
+    "mean_absolute_channel_error": 4.721,
+    "note": "Diagnostic only; changed semantics, sample values and video content are not matched."
+  },
+  {
+    "page": 6,
+    "mean_absolute_channel_error": 4.489,
+    "note": "Diagnostic only; changed semantics, sample values and video content are not matched."
+  }
+]

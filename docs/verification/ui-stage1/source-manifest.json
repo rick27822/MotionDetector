@@ -1,0 +1,9 @@
+{
+  "motiondetecter/core/types.h": "57c9955d3e8022040a700a53344a721e67b9814ed9093fb0a772acfe2a620c20",
+  "motiondetecter/core/types.cpp": "3d5b0995a66372860708336ea896712d07d49219120e9cef08964b5e8aaa0ce1",
+  "motiondetecter/modules/pose/SkeletonPainter.h": "eae4e48b9043e7ee2c13b982c5fb108f393852b8b636d653b5d38e523eaf6595",
+  "motiondetecter/modules/pose/SkeletonPainter.cpp": "98a624a3064e9d1e017d9fbf62764516e1213a2484ddfac3a365bf1a3bbdbb22",
+  "motiondetecter/fixtures/pose-result-sample.json": "7da06b5301356bd45647adb76a219d3d0aad3eaf08b26347e62e08d748b87356",
+  "motiondetecter/fixtures/pose-result-legacy.json": "5409dc4303821cd5bb6b7ee5bce30d3d31b01d527415f0214a6966167fb7f7a8",
+  "motiondetecter/fixtures/squat-series-3reps.jsonl": "c89a5782195fdef436545cc1a0b002453f41c078964574c0670af4c0d7ac60a3"
+}

@@ -1,0 +1,7 @@
+<RCC><qresource prefix="/">
+<file alias="theme/Style.qss">../theme/Style.qss</file>
+<file alias="images/person.png">reference-person.png</file>
+<file alias="fixtures/pose.json">../../../fixtures/pose-result-sample.json</file>
+<file alias="fixtures/legacy.json">../../../fixtures/pose-result-legacy.json</file>
+<file alias="fixtures/series.jsonl">../../../fixtures/squat-series-3reps.jsonl</file>
+</qresource></RCC>

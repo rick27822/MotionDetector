@@ -1,0 +1,194 @@
+[
+    {
+        "class": "ui::Sidebar",
+        "h": 900,
+        "name": "sidebar",
+        "w": 225,
+        "x": 0,
+        "y": 0
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 58
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 96
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 134
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 172
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 210
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 248
+    },
+    {
+        "class": "QFrame",
+        "h": 58,
+        "name": "subcard",
+        "w": 193,
+        "x": 16,
+        "y": 826
+    },
+    {
+        "class": "QWidget",
+        "h": 48,
+        "name": "topbar",
+        "w": 1215,
+        "x": 225,
+        "y": 0
+    },
+    {
+        "class": "QPushButton",
+        "h": 28,
+        "name": "scenarioMenu",
+        "w": 75,
+        "x": 1353,
+        "y": 10
+    },
+    {
+        "class": "QStackedWidget",
+        "h": 852,
+        "name": "pages",
+        "w": 1215,
+        "x": 225,
+        "y": 48
+    },
+    {
+        "class": "ui::SettingsPage",
+        "h": 852,
+        "name": "page",
+        "w": 1215,
+        "x": 225,
+        "y": 48
+    },
+    {
+        "class": "QWidget",
+        "h": 852,
+        "name": "qt_scrollarea_viewport",
+        "w": 1215,
+        "x": 225,
+        "y": 48
+    },
+    {
+        "class": "QFrame",
+        "h": 211,
+        "name": "card",
+        "w": 807,
+        "x": 249,
+        "y": 72
+    },
+    {
+        "class": "QFrame",
+        "h": 246,
+        "name": "card",
+        "w": 807,
+        "x": 249,
+        "y": 303
+    },
+    {
+        "class": "QComboBox",
+        "h": 28,
+        "name": "captureResolution",
+        "w": 116,
+        "x": 920,
+        "y": 356
+    },
+    {
+        "class": "QComboBox",
+        "h": 28,
+        "name": "captureFps",
+        "w": 81,
+        "x": 955,
+        "y": 394
+    },
+    {
+        "class": "ui::ToggleField",
+        "h": 18,
+        "name": "mirrorVideo",
+        "w": 30,
+        "x": 1006,
+        "y": 507
+    },
+    {
+        "class": "QFrame",
+        "h": 147,
+        "name": "card",
+        "w": 340,
+        "x": 1076,
+        "y": 72
+    },
+    {
+        "class": "QSpinBox",
+        "h": 28,
+        "name": "inferenceThreads",
+        "w": 72,
+        "x": 1324,
+        "y": 142
+    },
+    {
+        "class": "QLineEdit",
+        "h": 14,
+        "name": "qt_spinbox_lineedit",
+        "w": 36,
+        "x": 1335,
+        "y": 149
+    },
+    {
+        "class": "QFrame",
+        "h": 173,
+        "name": "card",
+        "w": 340,
+        "x": 1076,
+        "y": 239
+    },
+    {
+        "class": "QPushButton",
+        "h": 34,
+        "name": "storageDirectory",
+        "w": 170,
+        "x": 1226,
+        "y": 291
+    },
+    {
+        "class": "QFrame",
+        "h": 130,
+        "name": "card",
+        "w": 340,
+        "x": 1076,
+        "y": 432
+    }
+]

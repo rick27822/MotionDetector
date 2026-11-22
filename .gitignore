@@ -1,0 +1,12 @@
+.DS_Store
+motiondetecter/build/
+motiondetecter/build-*/
+motiondetecter/.qtcreator/
+*.user
+output/*.app/
+output/.*.app/
+__pycache__/
+
+output/
+
+.workbuddy/

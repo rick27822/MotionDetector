@@ -1,0 +1,186 @@
+[
+    {
+        "class": "ui::Sidebar",
+        "h": 900,
+        "name": "sidebar",
+        "w": 225,
+        "x": 0,
+        "y": 0
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 64
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 102
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 140
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 178
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 216
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 254
+    },
+    {
+        "class": "QFrame",
+        "h": 58,
+        "name": "subcard",
+        "w": 193,
+        "x": 16,
+        "y": 826
+    },
+    {
+        "class": "QWidget",
+        "h": 48,
+        "name": "topbar",
+        "w": 1215,
+        "x": 225,
+        "y": 0
+    },
+    {
+        "class": "QPushButton",
+        "h": 28,
+        "name": "scenarioMenu",
+        "w": 82,
+        "x": 1346,
+        "y": 10
+    },
+    {
+        "class": "QStackedWidget",
+        "h": 852,
+        "name": "pages",
+        "w": 1215,
+        "x": 225,
+        "y": 48
+    },
+    {
+        "class": "ui::PlaybackPage",
+        "h": 852,
+        "name": "page",
+        "w": 1215,
+        "x": 225,
+        "y": 48
+    },
+    {
+        "class": "QFrame",
+        "h": 285,
+        "name": "card",
+        "w": 787,
+        "x": 249,
+        "y": 591
+    },
+    {
+        "class": "ui::ChartView",
+        "h": 218,
+        "name": "playbackChart",
+        "w": 755,
+        "x": 265,
+        "y": 642
+    },
+    {
+        "class": "ui::VideoView",
+        "h": 461,
+        "name": "playbackVideo",
+        "w": 787,
+        "x": 249,
+        "y": 72
+    },
+    {
+        "class": "QPushButton",
+        "h": 30,
+        "name": "playPause",
+        "w": 24,
+        "x": 249,
+        "y": 547
+    },
+    {
+        "class": "QSlider",
+        "h": 14,
+        "name": "playbackPosition",
+        "w": 580,
+        "x": 285,
+        "y": 555
+    },
+    {
+        "class": "QComboBox",
+        "h": 30,
+        "name": "playbackRate",
+        "w": 68,
+        "x": 968,
+        "y": 547
+    },
+    {
+        "class": "QFrame",
+        "h": 804,
+        "name": "card",
+        "w": 360,
+        "x": 1056,
+        "y": 72
+    },
+    {
+        "class": "QWidget",
+        "h": 696,
+        "name": "qt_scrollarea_viewport",
+        "w": 328,
+        "x": 1072,
+        "y": 120
+    },
+    {
+        "class": "QPushButton",
+        "h": 41,
+        "name": "session",
+        "w": 328,
+        "x": 1072,
+        "y": 120
+    },
+    {
+        "class": "QPushButton",
+        "h": 41,
+        "name": "session",
+        "w": 328,
+        "x": 1072,
+        "y": 171
+    },
+    {
+        "class": "QPushButton",
+        "h": 41,
+        "name": "session",
+        "w": 328,
+        "x": 1072,
+        "y": 222
+    }
+]

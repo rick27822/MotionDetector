@@ -1,0 +1,186 @@
+[
+    {
+        "class": "ui::Sidebar",
+        "h": 900,
+        "name": "sidebar",
+        "w": 225,
+        "x": 0,
+        "y": 0
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 58
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 96
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 134
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 172
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 210
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 248
+    },
+    {
+        "class": "QFrame",
+        "h": 58,
+        "name": "subcard",
+        "w": 193,
+        "x": 16,
+        "y": 826
+    },
+    {
+        "class": "QWidget",
+        "h": 48,
+        "name": "topbar",
+        "w": 1215,
+        "x": 225,
+        "y": 0
+    },
+    {
+        "class": "QPushButton",
+        "h": 28,
+        "name": "scenarioMenu",
+        "w": 75,
+        "x": 1353,
+        "y": 10
+    },
+    {
+        "class": "QStackedWidget",
+        "h": 852,
+        "name": "pages",
+        "w": 1215,
+        "x": 225,
+        "y": 48
+    },
+    {
+        "class": "ui::RealtimePage",
+        "h": 852,
+        "name": "page",
+        "w": 1215,
+        "x": 225,
+        "y": 48
+    },
+    {
+        "class": "ui::VideoView",
+        "h": 795,
+        "name": "realtimeVideo",
+        "w": 915,
+        "x": 225,
+        "y": 48
+    },
+    {
+        "class": "QFrame",
+        "h": 193,
+        "name": "card",
+        "w": 268,
+        "x": 1156,
+        "y": 79
+    },
+    {
+        "class": "QFrame",
+        "h": 168,
+        "name": "card",
+        "w": 268,
+        "x": 1156,
+        "y": 286
+    },
+    {
+        "class": "ui::ToggleField",
+        "h": 18,
+        "name": "showSkeleton",
+        "w": 30,
+        "x": 1380,
+        "y": 361
+    },
+    {
+        "class": "ui::ToggleField",
+        "h": 18,
+        "name": "showAngles",
+        "w": 30,
+        "x": 1380,
+        "y": 390
+    },
+    {
+        "class": "QFrame",
+        "h": 78,
+        "name": "card",
+        "w": 268,
+        "x": 1156,
+        "y": 468
+    },
+    {
+        "class": "QWidget",
+        "h": 57,
+        "name": "realtimeFooter",
+        "w": 1215,
+        "x": 225,
+        "y": 843
+    },
+    {
+        "class": "QPushButton",
+        "h": 34,
+        "name": "toggleDetection",
+        "w": 101,
+        "x": 237,
+        "y": 854
+    },
+    {
+        "class": "QPushButton",
+        "h": 34,
+        "name": "toggleRecording",
+        "w": 107,
+        "x": 346,
+        "y": 854
+    },
+    {
+        "class": "QComboBox",
+        "h": 30,
+        "name": "poseSampleSource",
+        "w": 136,
+        "x": 461,
+        "y": 856
+    },
+    {
+        "class": "QPushButton",
+        "h": 34,
+        "name": "videoFit",
+        "w": 32,
+        "x": 1396,
+        "y": 854
+    }
+]

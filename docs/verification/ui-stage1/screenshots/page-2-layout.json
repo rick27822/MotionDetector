@@ -1,0 +1,218 @@
+[
+    {
+        "class": "ui::Sidebar",
+        "h": 900,
+        "name": "sidebar",
+        "w": 225,
+        "x": 0,
+        "y": 0
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 64
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 102
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 140
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 178
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 216
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 254
+    },
+    {
+        "class": "QFrame",
+        "h": 58,
+        "name": "subcard",
+        "w": 193,
+        "x": 16,
+        "y": 826
+    },
+    {
+        "class": "QWidget",
+        "h": 48,
+        "name": "topbar",
+        "w": 1215,
+        "x": 225,
+        "y": 0
+    },
+    {
+        "class": "QPushButton",
+        "h": 28,
+        "name": "scenarioMenu",
+        "w": 82,
+        "x": 1346,
+        "y": 10
+    },
+    {
+        "class": "QStackedWidget",
+        "h": 852,
+        "name": "pages",
+        "w": 1215,
+        "x": 225,
+        "y": 48
+    },
+    {
+        "class": "ui::DevicePage",
+        "h": 852,
+        "name": "page",
+        "w": 1215,
+        "x": 225,
+        "y": 48
+    },
+    {
+        "class": "QFrame",
+        "h": 804,
+        "name": "card",
+        "w": 400,
+        "x": 249,
+        "y": 72
+    },
+    {
+        "class": "QFrame",
+        "h": 267,
+        "name": "card",
+        "w": 743,
+        "x": 673,
+        "y": 72
+    },
+    {
+        "class": "QFrame",
+        "h": 58,
+        "name": "subcard",
+        "w": 703,
+        "x": 693,
+        "y": 125
+    },
+    {
+        "class": "QPushButton",
+        "h": 26,
+        "name": "connectIphone",
+        "w": 59,
+        "x": 1325,
+        "y": 141
+    },
+    {
+        "class": "QFrame",
+        "h": 58,
+        "name": "subcard",
+        "w": 703,
+        "x": 693,
+        "y": 193
+    },
+    {
+        "class": "QPushButton",
+        "h": 26,
+        "name": "connectXiaomi",
+        "w": 47,
+        "x": 1337,
+        "y": 209
+    },
+    {
+        "class": "QFrame",
+        "h": 58,
+        "name": "subcard",
+        "w": 703,
+        "x": 693,
+        "y": 261
+    },
+    {
+        "class": "QPushButton",
+        "h": 26,
+        "name": "connectOffline",
+        "w": 59,
+        "x": 1325,
+        "y": 277
+    },
+    {
+        "class": "QFrame",
+        "h": 257,
+        "name": "card",
+        "w": 743,
+        "x": 673,
+        "y": 359
+    },
+    {
+        "class": "QFrame",
+        "h": 61,
+        "name": "subcard",
+        "w": 346,
+        "x": 693,
+        "y": 415
+    },
+    {
+        "class": "QFrame",
+        "h": 61,
+        "name": "subcard",
+        "w": 345,
+        "x": 1051,
+        "y": 415
+    },
+    {
+        "class": "QFrame",
+        "h": 61,
+        "name": "subcard",
+        "w": 346,
+        "x": 693,
+        "y": 488
+    },
+    {
+        "class": "QFrame",
+        "h": 61,
+        "name": "subcard",
+        "w": 345,
+        "x": 1051,
+        "y": 488
+    },
+    {
+        "class": "QPushButton",
+        "h": 35,
+        "name": "disconnectDevice",
+        "w": 346,
+        "x": 693,
+        "y": 561
+    },
+    {
+        "class": "QPushButton",
+        "h": 35,
+        "name": "refreshDevices",
+        "w": 345,
+        "x": 1051,
+        "y": 561
+    }
+]

@@ -1,0 +1,121 @@
+[
+  {
+    "page": 1,
+    "name": "realtimeVideo",
+    "expected": [
+      225,
+      48,
+      915,
+      795
+    ],
+    "actual": [
+      225,
+      48,
+      915,
+      795
+    ],
+    "maximum_error_px": 0
+  },
+  {
+    "page": 2,
+    "name": "card",
+    "expected": [
+      249,
+      72,
+      400,
+      804
+    ],
+    "actual": [
+      249,
+      72,
+      400,
+      804
+    ],
+    "maximum_error_px": 0
+  },
+  {
+    "page": 3,
+    "name": "card",
+    "expected": [
+      249,
+      194,
+      767,
+      229
+    ],
+    "actual": [
+      249,
+      194,
+      767,
+      229
+    ],
+    "maximum_error_px": 0
+  },
+  {
+    "page": 4,
+    "name": "playbackVideo",
+    "expected": [
+      249,
+      72,
+      787,
+      461
+    ],
+    "actual": [
+      249,
+      72,
+      787,
+      461
+    ],
+    "maximum_error_px": 0
+  },
+  {
+    "page": 4,
+    "name": "card",
+    "expected": [
+      249,
+      591,
+      787,
+      285
+    ],
+    "actual": [
+      249,
+      591,
+      787,
+      285
+    ],
+    "maximum_error_px": 0
+  },
+  {
+    "page": 5,
+    "name": "card",
+    "expected": [
+      249,
+      196,
+      847,
+      680
+    ],
+    "actual": [
+      249,
+      196,
+      847,
+      680
+    ],
+    "maximum_error_px": 0
+  },
+  {
+    "page": 6,
+    "name": "card",
+    "expected": [
+      249,
+      72,
+      807,
+      211
+    ],
+    "actual": [
+      249,
+      72,
+      807,
+      211
+    ],
+    "maximum_error_px": 0
+  }
+]

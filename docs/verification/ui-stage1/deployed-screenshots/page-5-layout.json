@@ -1,0 +1,170 @@
+[
+    {
+        "class": "ui::Sidebar",
+        "h": 900,
+        "name": "sidebar",
+        "w": 225,
+        "x": 0,
+        "y": 0
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 64
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 102
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 140
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 178
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 216
+    },
+    {
+        "class": "QPushButton",
+        "h": 36,
+        "name": "nav",
+        "w": 193,
+        "x": 16,
+        "y": 254
+    },
+    {
+        "class": "QFrame",
+        "h": 58,
+        "name": "subcard",
+        "w": 193,
+        "x": 16,
+        "y": 826
+    },
+    {
+        "class": "QWidget",
+        "h": 48,
+        "name": "topbar",
+        "w": 1215,
+        "x": 225,
+        "y": 0
+    },
+    {
+        "class": "QPushButton",
+        "h": 28,
+        "name": "scenarioMenu",
+        "w": 82,
+        "x": 1346,
+        "y": 10
+    },
+    {
+        "class": "QStackedWidget",
+        "h": 852,
+        "name": "pages",
+        "w": 1215,
+        "x": 225,
+        "y": 48
+    },
+    {
+        "class": "ui::AnalysisPage",
+        "h": 852,
+        "name": "page",
+        "w": 1215,
+        "x": 225,
+        "y": 48
+    },
+    {
+        "class": "QFrame",
+        "h": 104,
+        "name": "card",
+        "w": 280,
+        "x": 249,
+        "y": 72
+    },
+    {
+        "class": "QFrame",
+        "h": 104,
+        "name": "card",
+        "w": 280,
+        "x": 545,
+        "y": 72
+    },
+    {
+        "class": "QFrame",
+        "h": 104,
+        "name": "card",
+        "w": 279,
+        "x": 841,
+        "y": 72
+    },
+    {
+        "class": "QFrame",
+        "h": 104,
+        "name": "card",
+        "w": 280,
+        "x": 1136,
+        "y": 72
+    },
+    {
+        "class": "QFrame",
+        "h": 680,
+        "name": "card",
+        "w": 847,
+        "x": 249,
+        "y": 196
+    },
+    {
+        "class": "QFrame",
+        "h": 225,
+        "name": "card",
+        "w": 300,
+        "x": 1116,
+        "y": 196
+    },
+    {
+        "class": "QFrame",
+        "h": 380,
+        "name": "card",
+        "w": 300,
+        "x": 1116,
+        "y": 441
+    },
+    {
+        "class": "QPushButton",
+        "h": 35,
+        "name": "exportReport",
+        "w": 145,
+        "x": 1116,
+        "y": 841
+    },
+    {
+        "class": "QPushButton",
+        "h": 35,
+        "name": "exportCsv",
+        "w": 145,
+        "x": 1271,
+        "y": 841
+    }
+]

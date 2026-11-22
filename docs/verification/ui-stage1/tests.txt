@@ -1,0 +1,24 @@
+********* Start testing of UiTests *********
+Config: Using QtTest library 6.11.0, Qt 6.11.0 (arm64-little_endian-lp64 shared (dynamic) release build; by Apple LLVM 17.0.0 (clang-1700.6.4.2)), macos 15.5.0
+PASS   : UiTests::initTestCase()
+PASS   : UiTests::sixPagesAndNavigation()
+PASS   : UiTests::legacyAndCurrentSamples()
+PASS   : UiTests::angleValidityAndConflicts()
+PASS   : UiTests::malformedSeriesPreservesOutput()
+PASS   : UiTests::m0AdaptationIsExplicitlySimulated()
+PASS   : UiTests::draftDoesNotApplyUntilSaveAndPersists()
+PASS   : UiTests::failedSavePreservesEffectiveAndDiskConfig()
+PASS   : UiTests::corruptConfigDoesNotGetOverwrittenOnStartup()
+PASS   : UiTests::deviceAsyncFailureRetryAndSharedState()
+PASS   : UiTests::disconnectCancelsPendingConnection()
+QWARN  : UiTests::recordingFailureAndDisconnectFinalization() qt.qpa.fonts: Populating font family aliases took 34 ms. Replace uses of missing font family "SF Mono" with one that exists to avoid this cost. 
+PASS   : UiTests::recordingFailureAndDisconnectFinalization()
+PASS   : UiTests::playbackSeekPauseRateAndSessionReset()
+PASS   : UiTests::actualSampleExportsAndFailure()
+PASS   : UiTests::emptyStateCanRecoverAndCreateSample()
+PASS   : UiTests::handoffSampleAndKeypointSelectionReachRealtime()
+PASS   : UiTests::keyboardAndMinimumWindow()
+PASS   : UiTests::videoMirrorUsesSameImageTransform()
+PASS   : UiTests::cleanupTestCase()
+Totals: 19 passed, 0 failed, 0 skipped, 0 blacklisted, 3924ms
+********* Finished testing of UiTests *********
