@@ -1,4 +1,4 @@
-# PoseLab · 动作捕捉检测系统
+# MotionDetecter · 动作捕捉检测系统
 
 源码分支：`feat/chenkerui-ui-stage1`。本分支为陈柯睿负责的六页 UI 阶段一成果，基于团队 main 初始化提交。相机和分析的独立分支尚未合入本分支。
 
