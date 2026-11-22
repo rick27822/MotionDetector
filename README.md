@@ -6,6 +6,8 @@
 
 ## 直接运行
 
+GitHub分支只包含源码、必要资源与验收材料，不包含`output/`应用包或源码压缩包。克隆后请先按下文“从源码构建”执行；以下双击方式适用于已生成应用包的本地工作区。
+
 在 Finder 中双击 `output/PoseLab-UI.app`。这是当前 arm64 Mac 的本地验收包，带 Qt 运行依赖，不需要 Python、OpenCV 或 ONNX 模型。应用采用本地 ad-hoc 签名，尚未进行 Developer ID 公证；当前已验证平台为 macOS 15.5 / arm64，不承诺其他系统版本。
 
 也可以在工作区终端运行：
