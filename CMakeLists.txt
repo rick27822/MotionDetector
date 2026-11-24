@@ -19,3 +19,7 @@ add_test(NAME offline_analysis COMMAND analysis_tests)
 add_executable(camera_time_tests tests/camera_time_tests.cpp)
 target_link_libraries(camera_time_tests PRIVATE analysis_mock)
 add_test(NAME camera_time_contract COMMAND camera_time_tests)
+
+add_executable(quality_tests tests/quality_tests.cpp)
+target_link_libraries(quality_tests PRIVATE analysis_mock)
+add_test(NAME offline_quality_rules COMMAND quality_tests)

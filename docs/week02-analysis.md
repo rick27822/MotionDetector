@@ -1,31 +1,19 @@
-# 第二周离线分析（当前实现子集）
+# 第二周 M1：陈艺夫离线分析与测试
 
-前置：第一周M0接口和Mock已通过PR合入chenyifu；本分支week02-analysis从该合并点创建。
+2026-11-24更新。沿用week02-analysis分支及原有目录结构，本次只补充个人分析职责范围。
 
-## 本次新增
+## 本次补齐
 
-- modules/analysis/AnalysisEngine.h：左膝极值、ROM、峰值角速度和基础周期。
-- modules/analysis/CameraTimeAdapter.h：相机会话/帧身份及Unix秒到会话毫秒转换辅助。
-- tests/analysis_tests.cpp：28项检查。
-- tests/camera_time_tests.cpp：11项检查。
-- examples/offline_demo.cpp、week2.pro及相关构建入口。
-- validation/qt_smoke：Qt Widgets/SQLite/分析引擎集成验证源码。
-- docs中的相机接口来源、对接记录和验证报告。
+- modules/analysis/AnalysisEngine.h：双膝ROM对称性、可配置实验评分和A/B/C等级、规则校验及大权重计算溢出修复。默认禁用评分。
+- tests/quality_tests.cpp：43条断言，覆盖指标、评分、异常输入、边界和12次连续动作。
+- examples/offline_demo.cpp：12次合成动作，可选 --experimental-score。
+- quality_test.pro、week2.pro、CMakeLists.txt：按原有构建命名增加质量测试入口。
+- 本周规则、测试报告和运行日志。
 
-## 第一周内容继续保留
+## 验收结果
 
-core/types.h、两个I*接口、MockServices、mock_demo、17项Mock检查、week1.pro及docs/week01-m0.md。
+独立构建4组CTest全部通过，含Mock、基础分析、已有时间适配和质量规则。没有引入新姿态源码或UI代码。沿用原分支core/types.h和I*接口，不更换公共类型。
 
-本周根CMakeLists扩展为三组测试，README更新本机Windows与队友macOS差异；并未另建一套嵌套项目。
+[测试报告](week02-test-report.md)与[工程规则v0.1](week02-scoring-proposal.md)记录本次验收依据。正式动作质量标准仍需团队确认，真人精度需要真实数据验证。
 
-## 仍未完成
-
-综合评分、左右对称性、真正动作纠正、业务数据库、CSV/报告导出、真实Python相机到C++的通信、完整UI。不能把基础离线测试通过表述为全部M1验收完成。
-
-本次暂不提交.github工作流；多复制的工作流已备份到聊天工作目录，后续单独配置CI。
-
-## 提交说明建议
-
-feat: add week2 offline analysis and tests
-
-PR目标chenyifu，来源week02-analysis。先核对Desktop的Changes，再手动提交和推送。
+第三周进行P1数据与动作提示联调，第四周进行配置持久化，第五周进行正式导出与报告，第六周集成验收。
