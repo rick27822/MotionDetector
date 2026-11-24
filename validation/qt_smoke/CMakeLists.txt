@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.16)
+project(QtInstallCheck LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+find_package(Qt6 6.5.3 EXACT REQUIRED COMPONENTS Widgets Sql)
+add_executable(qt_install_check main.cpp)
+target_link_libraries(qt_install_check PRIVATE Qt6::Widgets Qt6::Sql)
+target_include_directories(qt_install_check PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../..")
