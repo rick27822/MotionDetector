@@ -32,3 +32,7 @@ validation/qt_smoke提供Qt Widgets/Sql与真实分析引擎的小型集成检�
 在姓名分支chenyifu汇总，每周任务分支经PR合回姓名分支，再由团队决定向main合并。当前提交状态以Git记录为准。
 
 2026-11-24第二周个人模块技术验收：4组测试通过。详见docs/week02-test-report.md及docs/week02-scoring-proposal.md。
+
+## 第三周个人模块
+
+实时动作提示与逐帧计次见docs/week03-realtime.md，P1交接见docs/week03-ui-handoff.md。独立演示realtime_demo，qmake入口week3.pro。个人模块5组测试通过，真实P1联合验收待完成。

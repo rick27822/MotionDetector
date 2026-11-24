@@ -23,3 +23,11 @@ add_test(NAME camera_time_contract COMMAND camera_time_tests)
 add_executable(quality_tests tests/quality_tests.cpp)
 target_link_libraries(quality_tests PRIVATE analysis_mock)
 add_test(NAME offline_quality_rules COMMAND quality_tests)
+
+# Week 3 personal realtime hint module.
+target_compile_options(analysis_mock INTERFACE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
+add_executable(realtime_demo examples/realtime_demo.cpp)
+target_link_libraries(realtime_demo PRIVATE analysis_mock)
+add_executable(realtime_tests tests/realtime_tests.cpp)
+target_link_libraries(realtime_tests PRIVATE analysis_mock)
+add_test(NAME realtime_action_hints COMMAND realtime_tests)
