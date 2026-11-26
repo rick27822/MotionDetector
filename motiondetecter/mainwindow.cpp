@@ -9,6 +9,7 @@
 #include "modules/ui/widgets/Controls.h"
 #include <QCloseEvent>
 #include <QMenu>
+#include <QFileDialog>
 #include <QStandardPaths>
 #include <QTimer>
 using namespace ui;
@@ -23,6 +24,8 @@ MainWindow::MainWindow(const QString &directory, QWidget *parent) : QMainWindow(
     m_settings = new SettingsController(m_state, path, this);
     m_devices = new DeviceController(m_state, this);
     m_detection = new DetectionController(m_state, this);
+    m_realtime = new RealtimeController(m_state, this);
+    m_replay = new PoseReplay(m_realtime, this);
     m_sessions = new SessionController(m_state, path, this);
     auto central = new QWidget;
     central->setFocusPolicy(Qt::StrongFocus);
@@ -54,7 +57,26 @@ MainWindow::MainWindow(const QString &directory, QWidget *parent) : QMainWindow(
     m_backendStatus->setStyleSheet(
         "color:#00D776;font-size:11px;background:#151718;border-radius:6px;padding:6px;");
     header->addWidget(m_backendStatus);
+    auto replayButton = button("姿态回放 ▾", "poseReplayMenu");
+    auto replayMenu = new QMenu(replayButton);
+    connect(replayMenu->addAction("打开姿态文件…"), &QAction::triggered, this, [this] {
+        const auto path = QFileDialog::getOpenFileName(this, "选择姿态或角度文件", {},
+                                                      "姿态数据 (*.json *.jsonl)");
+        if (path.isEmpty())
+            return;
+        QString error;
+        if (!startPoseReplay(path, error))
+            showFeedback("姿态回放失败：" + error, false);
+    });
+    connect(replayMenu->addAction("12次动作合成样例"), &QAction::triggered, this, [this] {
+        QString error;
+        if (!startPoseReplay(":/fixtures/realtime-12reps.jsonl", error))
+            showFeedback("姿态回放失败：" + error, false);
+    });
+    replayButton->setMenu(replayMenu);
+    header->addWidget(replayButton);
     auto mode = button("UI 样例 ▾", "scenarioMenu");
+    mode->setObjectName("scenarioMenu");
     mode->setFixedHeight(28);
     mode->setStyleSheet("font-size:11px;color:#FFAB40;background:#241A06;padding:3px "
                         "9px;border:0;border-radius:6px;");
@@ -79,7 +101,7 @@ MainWindow::MainWindow(const QString &directory, QWidget *parent) : QMainWindow(
     right->addWidget(top);
     m_pages = new QStackedWidget;
     m_pages->setObjectName("pages");
-    m_pages->addWidget(new RealtimePage(m_state, m_detection));
+    m_pages->addWidget(new RealtimePage(m_state, m_detection, m_realtime));
     m_pages->addWidget(new DevicePage(m_state, m_devices));
     m_pages->addWidget(new DetectionConfigPage(m_state, m_settings));
     m_pages->addWidget(new PlaybackPage(m_state, m_sessions));
@@ -121,6 +143,10 @@ MainWindow::MainWindow(const QString &directory, QWidget *parent) : QMainWindow(
         if (currentPage() == PageId::Analysis)
             navigate(PageId::Analysis);
     });
+    connect(m_realtime, &RealtimeController::changed, this, [this] {
+        if (m_realtime->enabled())
+            m_backendStatus->setText(m_realtime->sourceName() + " · 实时提示已接入");
+    });
     navigate(PageId::Realtime);
     central->setFocus();
     if (!m_settings->error().isEmpty())
@@ -129,6 +155,32 @@ MainWindow::MainWindow(const QString &directory, QWidget *parent) : QMainWindow(
     if (!m_sessions->loadError().isEmpty())
         QTimer::singleShot(
             0, this, [this] { showFeedback("样例读取失败：" + m_sessions->loadError(), false); });
+}
+QString MainWindow::beginRealtimeInput(const QString &sourceName) {
+    m_replay->clear();
+    return activateRealtimeInput(sourceName);
+}
+QString MainWindow::activateRealtimeInput(const QString &sourceName) {
+    m_detection->stop();
+    m_devices->disconnectDevice(); // Cancel any outstanding sample-device connection.
+    m_detection->setRealtimeMode();
+    auto mode = findChild<QPushButton *>("scenarioMenu");
+    mode->setEnabled(false);
+    mode->setText("姿态输入");
+    setWindowTitle("PoseLab · P1 实时提示联调");
+    m_realtime->beginInput(sourceName);
+    return m_realtime->sessionId();
+}
+void MainWindow::endRealtimeInput(const QString &sessionToken) {
+    if (sessionToken.isEmpty() || sessionToken != m_realtime->sessionId())
+        return;
+    m_devices->disconnectDevice();
+}
+bool MainWindow::startPoseReplay(const QString &path, QString &error) {
+    if (!m_replay->load(path, error))
+        return false;
+    activateRealtimeInput(path.startsWith(":/fixtures/") ? "合成姿态回放" : "姿态文件回放");
+    return true;
 }
 void MainWindow::navigate(PageId page) {
     int index = int(page);
@@ -153,6 +205,8 @@ PageId MainWindow::currentPage() const {
     return static_cast<PageId>(m_pages->currentIndex());
 }
 void MainWindow::setScenario(const QString &scenario) {
+    if (m_realtime->enabled())
+        return;
     m_settings->setFailSave(scenario == "config-error");
     m_devices->setFailConnection(scenario == "connection-error");
     m_detection->setFailRecording(scenario == "recording-error");

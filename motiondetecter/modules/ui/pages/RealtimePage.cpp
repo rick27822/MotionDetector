@@ -5,9 +5,11 @@
 #include <QComboBox>
 #include <QHBoxLayout>
 #include <QProgressBar>
+#include <QSignalBlocker>
 namespace ui {
-RealtimePage::RealtimePage(AppState *s, DetectionController *controller, QWidget *parent)
-    : QWidget(parent), m_state(s) {
+RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
+                           RealtimeController *realtime, QWidget *parent)
+    : QWidget(parent), m_state(s), m_realtime(realtime) {
     QString sampleError;
     PoseSampleReader::readPoses(":/fixtures/pose.json", m_samples, sampleError);
     setObjectName("page");
@@ -38,7 +40,8 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller, QWidget
         auto r = row(core::angleName(j) + (j == core::JointAngle::LeftKnee ? "（关注）" : ""), v);
         angles->body->addWidget(r);
     }
-    auto bar = new QProgressBar;
+    auto bar = m_kneeProgress = new QProgressBar;
+    bar->setObjectName("realtimeKneeProgress");
     bar->setRange(0, 180);
     bar->setValue(87);
     bar->setTextVisible(false);
@@ -52,7 +55,7 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller, QWidget
     params->body->setSpacing(5);
     m_confidence = label("");
     params->body->addWidget(row("置信度阈值", m_confidence));
-    auto confidenceBar = new QProgressBar;
+    auto confidenceBar = m_confidenceProgress = new QProgressBar;
     confidenceBar->setRange(0, 100);
     confidenceBar->setTextVisible(false);
     confidenceBar->setFixedHeight(4);
@@ -79,16 +82,21 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller, QWidget
     });
     col->addWidget(params);
     auto hint = new CardWidget({}, right, 12);
-    hint->setFixedHeight(78);
+    hint->setMinimumHeight(116);
     hint->setStyleSheet("QFrame#card{background:#241A06;border-radius:12px;}");
     hint->body->setSpacing(4);
-    auto h = label("⚠  动作提示 · 样例");
+    auto h = m_hintTitle = label("⚠  动作提示 · 样例");
+    h->setObjectName("realtimeHintTitle");
     h->setStyleSheet("color:#FFCF00;font-size:12px;font-weight:600;");
     hint->body->addWidget(h);
-    auto text = label("人工标注仅用于界面验收。\n未接入真实推理与动作评判服务。", true);
+    auto text = m_hintText = label("人工标注仅用于界面验收。\n未接入真实推理与动作评判服务。", true);
+    text->setObjectName("realtimeHintText");
     text->setWordWrap(true);
     text->setStyleSheet("font-size:11px;color:#D4D4D8;");
     hint->body->addWidget(text);
+    m_repCount = label("累计次数：—");
+    m_repCount->setObjectName("realtimeRepCount");
+    hint->body->addWidget(m_repCount);
     col->addWidget(hint);
     col->addStretch();
     body->addWidget(right);
@@ -106,7 +114,7 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller, QWidget
     m_record->setToolTip("保存最多12.57秒的合成角度样例会话，不录制视频");
     controls->addWidget(m_detect);
     controls->addWidget(m_record);
-    auto source = new QComboBox;
+    auto source = m_source = new QComboBox;
     source->setObjectName("poseSampleSource");
     source->setFixedHeight(30);
     source->setAccessibleName("姿态样例来源");
@@ -120,7 +128,8 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller, QWidget
         refresh();
     });
     controls->addStretch();
-    auto note = label("静态参考图 · 无真实视频流", true);
+    auto note = m_sourceNote = label("静态参考图 · 无真实视频流", true);
+    note->setObjectName("realtimeSourceNote");
     controls->addWidget(note);
     auto fit = button("", "videoFit");
     fit->setIcon(icon("expand"));
@@ -139,30 +148,40 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller, QWidget
         confidenceBar->setValue(qRound(m_state->config.confidence * 100));
     });
     confidenceBar->setValue(qRound(s->config.confidence * 100));
+    connect(realtime, &RealtimeController::changed, this, &RealtimePage::refresh);
     refresh();
 }
 void RealtimePage::refresh() {
     core::PoseResult pose = m_sampleIndex >= 0 && m_sampleIndex < m_samples.size()
                                 ? m_samples[m_sampleIndex]
                                 : VideoView::referencePose();
-    for (int i = 0; i < pose.keypoints.size(); i++) {
-        QString name = core::keypointName(i);
-        if (QStringList{"左肩", "右肩", "左肘", "右肘", "左腕", "右腕", "左髋", "右髋", "左膝",
-                        "右膝", "左踝", "右踝"}
-                .contains(name) &&
-            !m_state->config.enabledPoints.contains(name))
-            pose.keypoints[i].valid = false;
-    }
-    const QVector<QVector<int>> deps = {{23, 25, 27},        {24, 26, 28},     {11, 23, 25},
-                                        {12, 24, 26},        {11, 12, 23, 24}, {11, 13, 15},
-                                        {12, 14, 16},        {13, 11, 23},     {14, 12, 24},
-                                        {0, 11, 12, 23, 24}, {25, 27, 31},     {26, 28, 32}};
-    for (int i = 0; i < deps.size(); i++)
-        for (int kp : deps[i])
-            if (!pose.hasKeypoint(kp))
-                pose.validAngles &= ~(1u << i);
+    const bool live = m_realtime->enabled();
+    if (live)
+        pose = m_realtime->pose();
+    if (!live) {
+        for (int i = 0; i < pose.keypoints.size(); i++) {
+            QString name = core::keypointName(i);
+            if (QStringList{"左肩", "右肩", "左肘", "右肘", "左腕", "右腕", "左髋", "右髋", "左膝",
+                            "右膝", "左踝", "右踝"}
+                    .contains(name) &&
+                !m_state->config.enabledPoints.contains(name))
+                pose.keypoints[i].valid = false;
+        }
+        const QVector<QVector<int>> deps = {{23, 25, 27},        {24, 26, 28},     {11, 23, 25},
+                                            {12, 24, 26},        {11, 12, 23, 24}, {11, 13, 15},
+                                            {12, 14, 16},        {13, 11, 23},     {14, 12, 24},
+                                            {0, 11, 12, 23, 24}, {25, 27, 31},     {26, 28, 32}};
+        for (int i = 0; i < deps.size(); i++)
+            for (int kp : deps[i])
+                if (!pose.hasKeypoint(kp))
+                    pose.validAngles &= ~(1u << i);
+    } // Live angles retain the producer's validity; preview masks apply only to samples.
+    const bool kneeValid = pose.hasAngle(core::JointAngle::LeftKnee);
+    m_kneeProgress->setValue(kneeValid ? qRound(pose.angle(core::JointAngle::LeftKnee)) : 0);
+    m_kneeProgress->setEnabled(kneeValid);
     video->setPose(pose);
-    video->setReferenceImageEnabled(m_sampleIndex < 0);
+    video->setReferenceImageEnabled(!live && m_sampleIndex < 0);
+    video->setSourceNote(live ? m_realtime->sourceName() + " · 无对应视频帧" : QString());
     for (auto pair : m_angleValues)
         pair.second->setText(pose.hasAngle(pair.first)
                                  ? QString::number(pose.angle(pair.first), 'f',
@@ -172,12 +191,36 @@ void RealtimePage::refresh() {
     video->setAvailable(m_state->connected && m_state->detecting);
     video->setOverlay(m_state->showSkeleton, m_state->showAngles);
     video->setMirror(m_state->config.mirror);
-    m_detect->setText(m_state->detecting ? "停止样例" : "开始样例检测");
+    m_detect->setText(live ? (m_state->detecting ? "停止检测" : "开始检测")
+                           : (m_state->detecting ? "停止样例" : "开始样例检测"));
     m_detect->setEnabled(m_state->connected);
     m_record->setText(m_state->recording ? "停止样例录制" : "开始样例录制");
-    m_record->setEnabled(m_state->connected && m_state->detecting);
+    m_record->setEnabled(!live && m_state->connected && m_state->detecting);
+    if (live) {
+        m_record->setText("视频录制未接入");
+        m_record->setToolTip("当前只接入姿态与实时提示，不生成视频或录制会话");
+    }
+    m_source->setEnabled(!live);
+    if (live && m_source->currentText() != m_realtime->sourceName()) {
+        QSignalBlocker blocker(m_source);
+        m_source->clear();
+        m_source->addItem(m_realtime->sourceName());
+    }
+    m_confidenceProgress->setVisible(!live);
+    if (live) {
+        const auto &r = m_realtime->result();
+        m_hintTitle->setText("动作提示");
+        m_hintText->setText(QString::fromStdString(r.message));
+        m_hintText->setTextFormat(Qt::PlainText);
+        m_repCount->setText(QString("累计次数：%1").arg(qulonglong(r.completedReps)));
+        m_sourceNote->setText(m_realtime->sourceName());
+        const bool warning = r.code == motion::RealtimeHintCode::DataLost ||
+                             r.code == motion::RealtimeHintCode::InvalidInput;
+        m_hintTitle->setStyleSheet(warning ? "color:#FFCF00;font-size:12px;font-weight:600;"
+                                          : "color:#00D776;font-size:12px;font-weight:600;");
+    }
     m_record->setProperty("variant", m_state->recording ? "danger" : "");
     polish(m_record);
-    m_confidence->setText(QString::number(m_state->config.confidence, 'f', 2));
+    m_confidence->setText(live ? "由姿态源配置" : QString::number(m_state->config.confidence, 'f', 2));
 }
 } // namespace ui

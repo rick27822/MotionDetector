@@ -17,6 +17,8 @@ add_library(motion_ui STATIC
     modules/ui/widgets/ChartView.cpp modules/ui/widgets/ChartView.h
     modules/ui/adapters/PoseSampleReader.cpp modules/ui/adapters/PoseSampleReader.h
     modules/ui/adapters/AnalysisM0Adapter.cpp modules/ui/adapters/AnalysisM0Adapter.h
+    modules/ui/controllers/RealtimeController.cpp modules/ui/controllers/RealtimeController.h
+    modules/ui/adapters/PoseReplay.cpp modules/ui/adapters/PoseReplay.h
     modules/ui/controllers/Controllers.cpp modules/ui/controllers/Controllers.h
     modules/ui/shell/Sidebar.cpp modules/ui/shell/Sidebar.h
     modules/ui/pages/RealtimePage.cpp modules/ui/pages/RealtimePage.h

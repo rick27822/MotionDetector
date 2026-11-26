@@ -27,6 +27,7 @@ class AppState : public QObject {
     UiConfig config;
     QString deviceId = "iphone", deviceName = "iPhone 15 Pro";
     bool connected = true, detecting = true, recording = false;
+    bool realtimeInput = false;
     bool showSkeleton = true, showAngles = true;
     QString sessionId = "sample-042";
     QVector<DemoSession> sessions;

@@ -7,6 +7,7 @@ class VideoView : public QWidget {
     Q_OBJECT
   public:
     explicit VideoView(bool playback = false, QWidget *parent = nullptr);
+    void setSourceNote(const QString &note) { m_sourceNote = note; update(); }
     void setPose(const core::PoseResult &pose);
     void setOverlay(bool skeleton, bool angles);
     void setAvailable(bool available);
@@ -25,6 +26,7 @@ class VideoView : public QWidget {
 
   private:
     QImage m_image;
+    QString m_sourceNote;
     core::PoseResult m_pose;
     bool m_reference = true;
     bool m_playback = false, m_skeleton = true, m_angles = true, m_available = true,

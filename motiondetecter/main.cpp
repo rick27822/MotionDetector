@@ -18,7 +18,7 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setApplicationVersion("0.1.0");
     ui::applyTheme(app);
     QCommandLineParser parser;
-    parser.setApplicationDescription("PoseLab 阶段一 · 六页 UI 与样例交互验收（无真实采集/推理）");
+    parser.setApplicationDescription("PoseLab · 六页 UI 与 P1 实时提示联调（支持姿态文件回放，未装配采集/推理）");
     parser.addHelpOption();
     parser.addVersionOption();
     parser.addOption({"data-dir", "独立样例配置与会话目录", "directory"});
@@ -29,8 +29,15 @@ int main(int argc, char *argv[]) {
                       "normal/disconnected/empty/connection-error/config-error/recording-error/"
                       "export-error/loading",
                       "name", "normal"});
+    parser.addOption({"replay", "按原始时间间隔回放姿态JSON或角度JSONL，联调P1提示", "file"});
+    parser.addOption({"replay-report", "回放结束后写入JSON结果和同名PNG截图并退出", "file"});
     parser.addOption({"page", "启动页1~6", "number", "1"});
     parser.process(app);
+    if ((parser.isSet("replay-report") && !parser.isSet("replay")) ||
+        (parser.isSet("replay") && (parser.isSet("capture") || parser.isSet("export-samples")))) {
+        std::fprintf(stderr, "回放报告需要 --replay，且回放不能与样例截图/导出同时使用\n");
+        return 2;
+    }
     QTemporaryDir captureData;
     QString data = parser.value("data-dir");
     if ((parser.isSet("capture") || parser.isSet("export-samples")) && data.isEmpty())
@@ -39,6 +46,48 @@ int main(int argc, char *argv[]) {
     w.setScenario(parser.value("scenario"));
     w.navigate(static_cast<ui::PageId>(qBound(1, parser.value("page").toInt(), 6) - 1));
     w.show();
+    if (parser.isSet("replay")) {
+        if (parser.isSet("replay-report")) {
+            QObject::connect(w.replay(), &ui::PoseReplay::finished, &w, [&] {
+                QTimer::singleShot(0, &w, [&] {
+                    const auto &r = w.realtime()->result();
+                    const auto token = w.realtime()->sessionId();
+                    const QString output = parser.value("replay-report");
+                    const QString screenshot = output + ".png";
+                    QJsonObject result{{"source", "pose-file-replay"},
+                                       {"realtimeService", "chenyifu-week03"},
+                                       {"sessionId", token},
+                                       {"completedReps", double(r.completedReps)},
+                                       {"message", QString::fromStdString(r.message)},
+                                       {"hintCode", int(r.code)},
+                                       {"droppedFrames", double(w.realtime()->droppedFrames())},
+                                       {"screenshot", screenshot},
+                                       {"liveCameraVerified", false}};
+                    QImage image(w.centralWidget()->size(), QImage::Format_ARGB32_Premultiplied);
+                    image.fill(Qt::transparent);
+                    w.centralWidget()->render(&image);
+                    QFile report(output);
+                    if (!image.save(screenshot) || !report.open(QFile::WriteOnly)) {
+                        app.exit(2);
+                        return;
+                    }
+                    const auto bytes = QJsonDocument(result).toJson();
+                    if (report.write(bytes) != bytes.size()) {
+                        app.exit(2);
+                        return;
+                    }
+                    std::printf("P1 replay: %llu reps; %s\n",
+                                static_cast<unsigned long long>(r.completedReps), qPrintable(output));
+                    app.quit();
+                });
+            });
+        }
+        QString error;
+        if (!w.startPoseReplay(parser.value("replay"), error)) {
+            std::fprintf(stderr, "姿态回放失败：%s\n", qPrintable(error));
+            return 2;
+        }
+    }
     if (parser.isSet("export-samples")) {
         QString output = parser.value("export-samples");
         if (!QDir().mkpath(output))

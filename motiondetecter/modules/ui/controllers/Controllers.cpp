@@ -128,6 +128,10 @@ bool SettingsController::apply(const UiConfig &config) {
 }
 DeviceController::DeviceController(AppState *s, QObject *p) : QObject(p), m_state(s) {}
 void DeviceController::connectDevice(const QString &id) {
+    if (m_state->realtimeInput) {
+        emit feedback("当前姿态输入由主程序管理，请重新绑定输入源", false);
+        return;
+    }
     if (m_busy)
         return;
     if (id != "iphone" && id != "xiaomi") {
@@ -183,7 +187,7 @@ DetectionController::DetectionController(AppState *s, QObject *p) : QObject(p), 
 }
 void DetectionController::toggleDetection() {
     if (!m_state->connected) {
-        emit feedback("请先在设备连接页连接样例设备", false);
+        emit feedback(m_realtimeMode ? "请先重新绑定姿态输入" : "请先在设备连接页连接样例设备", false);
         return;
     }
     if (m_state->detecting) {
@@ -192,7 +196,8 @@ void DetectionController::toggleDetection() {
     }
     m_state->detecting = true;
     emit m_state->detectionChanged();
-    emit feedback("样例展示已开始：静态参考图与人工标注，不运行真实推理", true);
+    emit feedback(m_realtimeMode ? "实时提示已开始，等待姿态输入"
+                                : "样例展示已开始：静态参考图与人工标注，不运行真实推理", true);
 }
 void DetectionController::stop() {
     if (m_state->recording)
@@ -201,6 +206,10 @@ void DetectionController::stop() {
     emit m_state->detectionChanged();
 }
 void DetectionController::toggleRecording() {
+    if (m_realtimeMode) {
+        emit feedback("当前仅联调实时提示，真实视频录制服务尚未接入", false);
+        return;
+    }
     if (m_state->recording) {
         auto duration = qMax<qint64>(1, recordingMs());
         m_state->recording = false;

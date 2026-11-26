@@ -1,0 +1,11 @@
+{
+    "completedReps": 12,
+    "droppedFrames": 0,
+    "hintCode": 5,
+    "liveCameraVerified": false,
+    "message": "已完成一次",
+    "realtimeService": "chenyifu-week03",
+    "screenshot": "docs/verification/p1-realtime/replay-12reps.json.png",
+    "sessionId": "2193c3f0-7cdb-4a5e-9c99-c427fac9feec",
+    "source": "pose-file-replay"
+}

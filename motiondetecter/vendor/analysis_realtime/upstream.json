@@ -1,0 +1,10 @@
+{
+  "repository": "https://github.com/rick27822/MotionDetector",
+  "commit": "9d74c5e6fec2f39c380f41945ef9a7a4df984d30",
+  "upstreamDirectory": "modules/analysis",
+  "files": {
+    "IRealtimeAnalysisService.h": "710c514d047daa2e5a5e731511903e4e4bcd4ac5e877802a8b1ca8485e5a4f53",
+    "RealtimeAnalysisService.h": "48eb9bc36329868b24857732451e0f23fd1183bf3c0b6a390d25a9e709125d7d",
+    "RealtimePoseAdapter.h": "823235a6332a50e4b6b76a4adc90114c5238d91dd57b9357c960b0d29473b239"
+  }
+}

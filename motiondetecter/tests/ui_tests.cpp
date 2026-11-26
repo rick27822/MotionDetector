@@ -12,6 +12,8 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
+#include <thread>
+#include <limits>
 using namespace ui;
 class UiTests : public QObject {
     Q_OBJECT
@@ -28,7 +30,206 @@ class UiTests : public QObject {
         w.centralWidget()->render(&image);
         image.save(QDir(dir).filePath(name + ".png"));
     }
+    static core::PoseResult livePose(qint64 t, float knee, int frame = -1) {
+        core::PoseResult p;
+        p.timestampMs = t;
+        p.frameId = frame;
+        p.detected = true;
+        p.setAngle(core::JointAngle::LeftKnee, knee);
+        p.setAngle(core::JointAngle::Trunk, 0);
+        return p;
+    }
+    static void completeRep(RealtimeController *c, const QString &token, qint64 start = 0) {
+        const float angles[] = {170, 140, 90, 140, 170};
+        for (int i = 0; i < 5; ++i)
+            c->onPoseReady(livePose(start + i * 200, angles[i]), token);
+    }
   private slots:
+    void realtimeStagesCountAndPageShareInput() {
+        QTemporaryDir dir;
+        MainWindow w(dir.path());
+        const auto token = w.beginRealtimeInput("测试姿态输入");
+        auto c = w.realtime();
+        QSignalSpy reps(c, &RealtimeController::repCompleted);
+        const float angles[] = {170, 140, 90, 140, 170};
+        const motion::RealtimeHintCode codes[] = {motion::RealtimeHintCode::Ready,
+            motion::RealtimeHintCode::Descending, motion::RealtimeHintCode::Bottom,
+            motion::RealtimeHintCode::Rising, motion::RealtimeHintCode::RepCompleted};
+        for (int i = 0; i < 5; ++i) {
+            c->onPoseReady(livePose(5000 + i * 200, angles[i], i), token);
+            QCOMPARE(c->result().code, codes[i]);
+            QCOMPARE(c->pose().angle(core::JointAngle::LeftKnee), angles[i]);
+            QCOMPARE(w.findChild<QLabel *>("realtimeHintText")->text(),
+                     QString::fromStdString(c->result().message));
+        }
+        QCOMPARE(c->result().completedReps, std::uint64_t(1));
+        QCOMPARE(w.findChild<QLabel *>("realtimeRepCount")->text(), QString("累计次数：1"));
+        QCOMPARE(reps.size(), 1);
+        c->poll(); c->poll();
+        QCOMPARE(reps.size(), 1);
+        QVERIFY(!w.findChild<QPushButton *>("toggleRecording")->isEnabled());
+        const auto sessions = w.state()->sessions.size();
+        w.detection()->toggleRecording();
+        QCOMPARE(w.state()->sessions.size(), sessions);
+        QVERIFY(!w.state()->recording);
+        snapshot(w, "realtime-completed");
+    }
+    void realtimeTwelveReps() {
+        QTemporaryDir dir;
+        MainWindow w(dir.path());
+        auto token = w.beginRealtimeInput("12次合成动作");
+        QSignalSpy reps(w.realtime(), &RealtimeController::repCompleted);
+        const float angles[] = {170, 140, 90, 140, 170};
+        for (int rep = 0; rep < 12; ++rep)
+            for (int i = rep ? 1 : 0; i < 5; ++i)
+                w.realtime()->onPoseReady(livePose(rep * 800 + i * 200, angles[i]), token);
+        QCOMPARE(w.realtime()->result().completedReps, std::uint64_t(12));
+        QCOMPARE(reps.size(), 12);
+    }
+    void realtimeTimeoutClearsHudAndIncompleteCycle() {
+        QTemporaryDir dir;
+        MainWindow w(dir.path());
+        auto token = w.beginRealtimeInput("超时测试");
+        auto c = w.realtime();
+        c->onPoseReady(livePose(900000, 170), token);
+        c->onPoseReady(livePose(900200, 90), token);
+        QTRY_COMPARE_WITH_TIMEOUT(c->result().code, motion::RealtimeHintCode::DataLost, 900);
+        QVERIFY(!c->pose().detected);
+        QCOMPARE(c->pose().validAngles, quint32(0));
+        QVERIFY(w.findChild<QLabel *>("realtimeHintText")->text().contains("中断"));
+        snapshot(w, "realtime-timeout");
+        c->onPoseReady(livePose(900400, 170), token);
+        QCOMPARE(c->result().code, motion::RealtimeHintCode::Ready);
+        QCOMPARE(c->result().completedReps, std::uint64_t(0));
+        completeRep(c, token, 901000);
+        QCOMPARE(c->result().completedReps, std::uint64_t(1));
+        QTRY_COMPARE_WITH_TIMEOUT(c->result().code, motion::RealtimeHintCode::DataLost, 900);
+        QCOMPARE(c->result().completedReps, std::uint64_t(1));
+    }
+    void realtimeInitialSilenceIsVisible() {
+        QTemporaryDir dir;
+        MainWindow w(dir.path());
+        w.beginRealtimeInput("无帧输入");
+        QTRY_COMPARE_WITH_TIMEOUT(w.realtime()->result().code, motion::RealtimeHintCode::DataLost, 900);
+        QVERIFY(w.findChild<QLabel *>("realtimeHintText")->text().contains("未收到"));
+    }
+    void realtimeStopDisconnectAndOldGeneration() {
+        QTemporaryDir dir;
+        MainWindow w(dir.path());
+        auto token = w.beginRealtimeInput("会话测试");
+        auto c = w.realtime();
+        QSignalSpy ended(c, &RealtimeController::sessionEnded);
+        completeRep(c, token);
+        c->submitPose(livePose(1000, 90), token); // Pending callback from old generation.
+        w.detection()->stop();
+        QVERIFY(!c->active());
+        QCOMPARE(c->result().completedReps, std::uint64_t(0));
+        QCOMPARE(ended.size(), 1);
+        QCOMPARE(ended[0][1].toULongLong(), qulonglong(1));
+        snapshot(w, "realtime-stopped");
+        w.detection()->toggleDetection();
+        auto restarted = c->sessionId();
+        QVERIFY(!restarted.isEmpty() && restarted != token);
+        c->onPoseReady(livePose(1100, 170), token);
+        QApplication::processEvents();
+        QVERIFY(!c->pose().detected);
+        completeRep(c, restarted);
+        QCOMPARE(c->result().completedReps, std::uint64_t(1));
+        w.endRealtimeInput(restarted);
+        QVERIFY(!c->active());
+        QVERIFY(c->sessionId().isEmpty());
+        QCOMPARE(c->result().completedReps, std::uint64_t(0));
+        QVERIFY(w.findChild<QLabel *>("realtimeHintText")->text().contains("断开"));
+        snapshot(w, "realtime-disconnected");
+        auto reconnected = w.beginRealtimeInput("重新绑定输入");
+        w.endRealtimeInput(restarted);
+        QVERIFY(c->active());
+        QVERIFY(reconnected != restarted);
+        c->onPoseReady(livePose(9000, 170), restarted);
+        QVERIFY(!c->pose().detected);
+        completeRep(c, reconnected);
+        QCOMPARE(c->result().completedReps, std::uint64_t(1));
+    }
+    void realtimeInvalidPoseAndDuplicateDoNotCount() {
+        QTemporaryDir dir;
+        MainWindow w(dir.path());
+        auto token = w.beginRealtimeInput("有效性测试");
+        auto c = w.realtime();
+        c->onPoseReady(livePose(0, 170, 0), token);
+        auto absent = livePose(200, 90, 1);
+        absent.detected = false;
+        c->onPoseReady(absent, token);
+        QCOMPARE(c->result().code, motion::RealtimeHintCode::DataLost);
+        QCOMPARE(c->pose().validAngles, quint32(0));
+        c->onPoseReady(livePose(800, 170, 2), token);
+        QCOMPARE(c->result().completedReps, std::uint64_t(0));
+        c->onPoseReady(livePose(1000, 90, 3), token);
+        c->onPoseReady(livePose(1000, 90, 3), token);
+        QCOMPARE(c->result().code, motion::RealtimeHintCode::InvalidInput);
+        QVERIFY(!c->pose().detected);
+        c->onPoseReady(livePose(1400, 170, 4), token);
+        QCOMPARE(c->result().completedReps, std::uint64_t(0));
+        c->onPoseReady(livePose(1600, 0, 5), token);
+        QCOMPARE(c->result().code, motion::RealtimeHintCode::Bottom); // Zero is valid.
+        c->onPoseReady(livePose(1800, std::numeric_limits<float>::quiet_NaN(), 6), token);
+        QCOMPARE(c->result().code, motion::RealtimeHintCode::DataLost);
+        QVERIFY(!c->pose().hasAngle(core::JointAngle::LeftKnee));
+    }
+    void realtimeWorkerMailboxIsBoundedAndUpdatesGuiThread() {
+        QTemporaryDir dir;
+        MainWindow w(dir.path());
+        auto token = w.beginRealtimeInput("工作线程输入");
+        auto c = w.realtime();
+        bool guiOnly = true;
+        connect(c, &RealtimeController::changed, c, [&] {
+            guiOnly = guiOnly && QThread::currentThread() == qApp->thread();
+        }, Qt::DirectConnection);
+        std::thread worker([=] {
+            for (int i = 0; i < 10000; ++i)
+                c->onPoseReady(livePose(i, 170, i), token);
+        });
+        worker.join();
+        QCOMPARE(c->droppedFrames(), quint64(9999));
+        QVERIFY(!c->pose().detected);
+        QTRY_COMPARE(c->pose().timestampMs, qint64(9999));
+        QVERIFY(guiOnly);
+        QCOMPARE(c->result().completedReps, std::uint64_t(0));
+    }
+    void realtimeQueuedStaleCompletionCannotCount() {
+        QTemporaryDir dir;
+        MainWindow w(dir.path());
+        const auto token = w.beginRealtimeInput("过期帧测试");
+        auto c = w.realtime();
+        c->onPoseReady(livePose(0, 170), token);
+        c->onPoseReady(livePose(200, 90), token);
+        c->submitPose(livePose(800, 170), token);
+        QThread::msleep(550); // Deliberately block delivery of the queued completion.
+        QApplication::processEvents();
+        QCOMPARE(c->result().code, motion::RealtimeHintCode::DataLost);
+        QCOMPARE(c->result().completedReps, std::uint64_t(0));
+        QVERIFY(!c->pose().detected);
+    }
+    void realtimeReplayRunsThroughPageAndRestarts() {
+        QTemporaryDir dir;
+        MainWindow w(dir.path());
+        QString error;
+        QVERIFY(w.startPoseReplay(":/fixtures/pose.json", error));
+        auto token = w.realtime()->sessionId();
+        QSignalSpy finished(w.replay(), &PoseReplay::finished);
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 4000);
+        QVERIFY(w.realtime()->pose().detected);
+        QVERIFY(w.findChild<QLabel *>("realtimeSourceNote")->text().contains("回放"));
+        w.detection()->stop();
+        w.detection()->toggleDetection();
+        QVERIFY(w.realtime()->sessionId() != token);
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 2, 4000);
+        // Rebinding an external producer must not restart the old file source.
+        w.beginRealtimeInput("外部输入");
+        QVERIFY(!w.replay()->loaded());
+        QVERIFY(!w.realtime()->pose().detected);
+        QVERIFY(!w.startPoseReplay(dir.filePath("absent.json"), error));
+        QVERIFY(!error.isEmpty());
+    }
     void sixPagesAndNavigation() {
         QTemporaryDir dir;
         MainWindow w(dir.path());

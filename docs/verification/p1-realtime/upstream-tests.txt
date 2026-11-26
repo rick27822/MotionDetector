@@ -1,0 +1,42 @@
+PASS adapter keeps external session capture time and frame identity
+PASS adapter preserves zero and invalid channel
+PASS undetected pose invalidates stale angles
+PASS initial wait
+PASS start at bottom not armed
+PASS standing arms cycle
+PASS descending cue
+PASS bottom cue
+PASS rising cue
+PASS completed once
+PASS poll does not repeat completion event
+PASS standing does not count again
+PASS 500ms still current
+PASS stale without new frame
+PASS stale cancels cycle
+PASS recover keeps prior count
+PASS shallow does not count
+PASS too short does not count
+PASS missing knee resets movement
+PASS missing cannot bridge into cycle
+PASS duplicate timestamp rejected
+PASS duplicate breaks cycle
+PASS reversed timestamp rejected
+PASS negative time rejected
+PASS nonfinite knee missing
+PASS duplicate known frame identity
+PASS unknown identity does not erase last known ID
+PASS invalid thresholds
+PASS invalid direction threshold
+PASS invalid clock
+PASS clock same timestamp permitted
+PASS small change holds direction
+PASS twelve streamed repetitions
+PASS streamed and offline counts agree
+PASS new session resets count and clock
+PASS explicit reset on disconnect
+PASS posture threshold disabled by default
+PASS optional trunk threshold
+PASS trunk equality boundary
+PASS missing trunk not good posture
+PASS count exact thresholds
+41 realtime checks passed

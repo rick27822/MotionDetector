@@ -102,7 +102,9 @@ void VideoView::paintEvent(QPaintEvent *) {
     p.setClipPath(clip);
     if (!m_available) {
         p.setPen(Muted);
-        p.drawText(rect(), Qt::AlignCenter, "暂无画面\n请先连接样例设备，再开始检测");
+        p.drawText(rect(), Qt::AlignCenter, m_sourceNote.isEmpty()
+            ? "暂无画面\n请先连接样例设备，再开始检测"
+            : "暂无姿态画面\n请连接姿态输入并开始检测");
         return;
     }
     auto r = imageRect();
@@ -178,6 +180,8 @@ void VideoView::paintEvent(QPaintEvent *) {
     f.setPixelSize(10);
     p.setFont(f);
     QString note = m_reference ? "静态参考图 · 人工标注" : "交接姿态样例 · 无对应视频帧";
+    if (!m_sourceNote.isEmpty())
+        note = m_sourceNote;
     int nw = p.fontMetrics().horizontalAdvance(note) + 16;
     p.fillRect(QRect(12, height() - 30, nw, 20), QColor(0, 0, 0, 145));
     p.setPen(Qt::white);

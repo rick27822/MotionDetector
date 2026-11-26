@@ -112,15 +112,17 @@ void DevicePage::refresh() {
     QStringList values = {m_state->config.resolution, QString::number(m_state->config.fps) + " fps",
                           "45 ms", "78%"};
     for (int i = 0; i < m_infoValues.size(); i++)
-        m_infoValues[i]->setText(m_state->connected ? values[i] : "—");
+        m_infoValues[i]->setText(m_state->connected && !m_state->realtimeInput ? values[i] : "—");
     bool busy = m_controller->busy();
     m_info->setText("设备信息 · " + (m_state->connected ? m_state->deviceName : "未连接"));
     m_iphone->setText(m_state->connected && m_state->deviceId == "iphone" ? "使用中" : "连接");
     m_xiaomi->setText(m_state->connected && m_state->deviceId == "xiaomi" ? "使用中" : "连接");
-    m_iphone->setEnabled(!busy && (!m_state->connected || m_state->deviceId != "iphone"));
-    m_xiaomi->setEnabled(!busy && (!m_state->connected || m_state->deviceId != "xiaomi"));
+    m_iphone->setEnabled(!m_state->realtimeInput && !busy && (!m_state->connected || m_state->deviceId != "iphone"));
+    m_xiaomi->setEnabled(!m_state->realtimeInput && !busy && (!m_state->connected || m_state->deviceId != "xiaomi"));
     m_disconnect->setEnabled(m_state->connected && !busy);
-    m_refresh->setEnabled(!busy);
+    m_refresh->setEnabled(!busy && !m_state->realtimeInput);
+    if (m_state->realtimeInput)
+        m_status->setText("姿态输入由主程序管理，当前不使用样例设备。视频连接尚未接入。");
     m_refresh->setText(busy ? "正在处理…" : "刷新设备");
 }
 } // namespace ui

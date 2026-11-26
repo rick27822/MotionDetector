@@ -1,0 +1,55 @@
+UpdateCTestConfiguration  from :/Users/cherry/Desktop/project/motionDetecter/motiondetecter/build-p1/DartConfiguration.tcl
+Parse Config file:/Users/cherry/Desktop/project/motionDetecter/motiondetecter/build-p1/DartConfiguration.tcl
+Test project /Users/cherry/Desktop/project/motionDetecter/motiondetecter/build-p1
+Constructing a list of tests
+Done constructing a list of tests
+Updating test list for fixtures
+Added 0 tests to meet fixture requirements
+Checking test dependency graph...
+Checking test dependency graph end
+test 1
+    Start 1: ui_contracts
+
+1: Test command: /Users/cherry/Desktop/project/motionDetecter/motiondetecter/build-p1/ui_tests
+1: Working Directory: /Users/cherry/Desktop/project/motionDetecter/motiondetecter/build-p1
+1: Environment variables:
+1:  QT_QPA_PLATFORM=offscreen
+1: Test timeout computed to be: 1500
+1: ********* Start testing of UiTests *********
+1: Config: Using QtTest library 6.11.0, Qt 6.11.0 (arm64-little_endian-lp64 shared (dynamic) release build; by Apple LLVM 17.0.0 (clang-1700.6.4.2)), macos 15.5.0
+1: PASS   : UiTests::initTestCase()
+1: PASS   : UiTests::realtimeStagesCountAndPageShareInput()
+1: PASS   : UiTests::realtimeTwelveReps()
+1: PASS   : UiTests::realtimeTimeoutClearsHudAndIncompleteCycle()
+1: PASS   : UiTests::realtimeInitialSilenceIsVisible()
+1: PASS   : UiTests::realtimeStopDisconnectAndOldGeneration()
+1: PASS   : UiTests::realtimeInvalidPoseAndDuplicateDoNotCount()
+1: PASS   : UiTests::realtimeWorkerMailboxIsBoundedAndUpdatesGuiThread()
+1: PASS   : UiTests::realtimeQueuedStaleCompletionCannotCount()
+1: PASS   : UiTests::realtimeReplayRunsThroughPageAndRestarts()
+1: PASS   : UiTests::sixPagesAndNavigation()
+1: PASS   : UiTests::legacyAndCurrentSamples()
+1: PASS   : UiTests::angleValidityAndConflicts()
+1: PASS   : UiTests::malformedSeriesPreservesOutput()
+1: PASS   : UiTests::m0AdaptationIsExplicitlySimulated()
+1: PASS   : UiTests::draftDoesNotApplyUntilSaveAndPersists()
+1: PASS   : UiTests::failedSavePreservesEffectiveAndDiskConfig()
+1: PASS   : UiTests::corruptConfigDoesNotGetOverwrittenOnStartup()
+1: PASS   : UiTests::deviceAsyncFailureRetryAndSharedState()
+1: PASS   : UiTests::disconnectCancelsPendingConnection()
+1: QWARN  : UiTests::recordingFailureAndDisconnectFinalization() qt.qpa.fonts: Populating font family aliases took 32 ms. Replace uses of missing font family "SF Mono" with one that exists to avoid this cost.
+1: PASS   : UiTests::recordingFailureAndDisconnectFinalization()
+1: PASS   : UiTests::playbackSeekPauseRateAndSessionReset()
+1: PASS   : UiTests::actualSampleExportsAndFailure()
+1: PASS   : UiTests::emptyStateCanRecoverAndCreateSample()
+1: PASS   : UiTests::handoffSampleAndKeypointSelectionReachRealtime()
+1: PASS   : UiTests::keyboardAndMinimumWindow()
+1: PASS   : UiTests::videoMirrorUsesSameImageTransform()
+1: PASS   : UiTests::cleanupTestCase()
+1: Totals: 28 passed, 0 failed, 0 skipped, 0 blacklisted, 12471ms
+1: ********* Finished testing of UiTests *********
+1/1 Test #1: ui_contracts .....................   Passed   12.95 sec
+
+100% tests passed out of 1
+
+Total Test time (real) =  12.96 sec

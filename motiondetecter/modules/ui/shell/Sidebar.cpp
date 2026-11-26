@@ -65,6 +65,8 @@ Sidebar::Sidebar(AppState *state, QWidget *parent) : QWidget(parent), m_state(st
         m_detail->setText(m_state->connected ? "样例连接 · " + m_state->config.resolution + " · " +
                                                    QString::number(m_state->config.fps) + "fps"
                                              : "前往设备连接页开始");
+        if (m_state->realtimeInput)
+            m_detail->setText(m_state->connected ? "姿态输入 · 无对应视频" : "等待重新绑定姿态输入");
     };
     connect(state, &AppState::deviceChanged, this, refresh);
     connect(state, &AppState::configChanged, this, refresh);

@@ -51,6 +51,8 @@ class DetectionController : public QObject {
     Q_OBJECT
   public:
     explicit DetectionController(AppState *, QObject *parent = nullptr);
+    void setRealtimeMode() { m_realtimeMode = true; }
+    bool realtimeMode() const { return m_realtimeMode; }
     void toggleDetection();
     void toggleRecording();
     void stop();
@@ -63,7 +65,7 @@ class DetectionController : public QObject {
     AppState *m_state;
     QElapsedTimer m_clock;
     QTimer m_tick;
-    bool m_fail = false;
+    bool m_fail = false, m_realtimeMode = false;
   signals:
     void elapsedChanged(qint64);
     void sampleRecorded(qint64 duration);
