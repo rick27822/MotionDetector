@@ -94,6 +94,7 @@ class FramePacket:
     processing_ms: float
     source_bgr: np.ndarray  # 处理前原图，独立只读副本；叠加和录像可使用。
     config_revision: int
+    session_started_at: float | None = None  # 本会话建立时的本机单调秒
 
     def to_source(self, points):
         import numpy as np

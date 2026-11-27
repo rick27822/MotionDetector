@@ -166,6 +166,7 @@ class CameraEngine:
     def _new_session(self, source, status):
         with self._condition:
             self._session = uuid.uuid4().hex
+            self._session_start = time.monotonic()
             self._source, self._status = source, status
             self._latest = None
             self._times.clear()
@@ -224,7 +225,8 @@ class CameraEngine:
             self._session_frames += 1
             packet = FramePacket(self._sequence, session, source, received_at, monotonic_at,
                                  media_time, (bgr.shape[1], bgr.shape[0]), output, preview,
-                                 matrix, config.color, config.normalize, processing_ms, original, revision)
+                                 matrix, config.color, config.normalize, processing_ms, original, revision,
+                                 self._session_start)
             self._latest = packet
             self._times.append(monotonic_at)
             self._status, self._message = "running", "正在采集"

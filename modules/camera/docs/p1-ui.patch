@@ -1,0 +1,520 @@
+diff --git a/motiondetecter/CMakeLists.txt b/motiondetecter/CMakeLists.txt
+index dc9b419..efae35f 100644
+--- a/motiondetecter/CMakeLists.txt
++++ b/motiondetecter/CMakeLists.txt
+@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
+ project(motiondetecter VERSION 0.1.0 LANGUAGES CXX)
+ set(CMAKE_CXX_STANDARD 17)
+ set(CMAKE_CXX_STANDARD_REQUIRED ON)
+-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets)
++find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Network)
+ qt_standard_project_setup()
+ # Layouts are built in C++ to share the same widgets and support deterministic UI tests.
+ set(CMAKE_AUTOUIC OFF)
+@@ -16,6 +16,7 @@ add_library(motion_ui STATIC
+     modules/ui/widgets/VideoView.cpp modules/ui/widgets/VideoView.h
+     modules/ui/widgets/ChartView.cpp modules/ui/widgets/ChartView.h
+     modules/ui/adapters/PoseSampleReader.cpp modules/ui/adapters/PoseSampleReader.h
++    modules/ui/adapters/CameraStream.cpp modules/ui/adapters/CameraStream.h
+     modules/ui/adapters/AnalysisM0Adapter.cpp modules/ui/adapters/AnalysisM0Adapter.h
+     modules/ui/controllers/RealtimeController.cpp modules/ui/controllers/RealtimeController.h
+     modules/ui/adapters/PoseReplay.cpp modules/ui/adapters/PoseReplay.h
+@@ -30,7 +31,7 @@ add_library(motion_ui STATIC
+     mainwindow.cpp mainwindow.h
+     modules/ui/resources/ui.qrc)
+ target_include_directories(motion_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+-target_link_libraries(motion_ui PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets)
++target_link_libraries(motion_ui PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network)
+ qt_add_executable(motiondetecter MACOSX_BUNDLE WIN32 main.cpp)
+ target_link_libraries(motiondetecter PRIVATE motion_ui)
+ set_target_properties(motiondetecter PROPERTIES MACOSX_BUNDLE_BUNDLE_NAME PoseLab
+diff --git a/motiondetecter/mainwindow.cpp b/motiondetecter/mainwindow.cpp
+index 07703c5..be11532 100644
+--- a/motiondetecter/mainwindow.cpp
++++ b/motiondetecter/mainwindow.cpp
+@@ -101,7 +101,11 @@ MainWindow::MainWindow(const QString &directory, QWidget *parent) : QMainWindow(
+     right->addWidget(top);
+     m_pages = new QStackedWidget;
+     m_pages->setObjectName("pages");
+-    m_pages->addWidget(new RealtimePage(m_state, m_detection, m_realtime));
++    auto realtime = new RealtimePage(m_state, m_detection, m_realtime);
++    m_pages->addWidget(realtime);
++    connect(realtime, &RealtimePage::cameraModeChanged, this, [this](bool live) {
++        m_backendStatus->setText(live ? "摄像头 · 等待姿态服务" : "参考图 · 未接入推理");
++    });
+     m_pages->addWidget(new DevicePage(m_state, m_devices));
+     m_pages->addWidget(new DetectionConfigPage(m_state, m_settings));
+     m_pages->addWidget(new PlaybackPage(m_state, m_sessions));
+diff --git a/motiondetecter/modules/ui/adapters/CameraStream.cpp b/motiondetecter/modules/ui/adapters/CameraStream.cpp
+new file mode 100644
+index 0000000..4b17bec
+--- /dev/null
++++ b/motiondetecter/modules/ui/adapters/CameraStream.cpp
+@@ -0,0 +1,123 @@
++#include "CameraStream.h"
++#include <QDir>
++#include <QFileInfo>
++#include <QJsonDocument>
++#include <QJsonObject>
++#include <QtEndian>
++
++namespace ui {
++CameraStream::CameraStream(QObject *parent) : QObject(parent) {
++    process.setProcessChannelMode(QProcess::ForwardedErrorChannel);
++    stale.setSingleShot(true);
++    connect(&stale, &QTimer::timeout, this, [this] { emit statusChanged("等待新的相机画面"); });
++    connect(&process, &QProcess::readyReadStandardOutput, this, &CameraStream::readMessages);
++    connect(&process, &QProcess::errorOccurred, this, [this] {
++        stale.stop();
++        if (!selected.isNull()) emit statusChanged(process.errorString());
++    });
++    connect(&process, &QProcess::finished, this, [this] {
++        stale.stop();
++        ready = accepting = false;
++        if (!selected.isNull()) emit statusChanged("采集进程已退出，请重新开始");
++    });
++}
++CameraStream::~CameraStream() {
++    disconnect(&process, nullptr, this, nullptr);
++    process.closeWriteChannel();
++    if (process.state() != QProcess::NotRunning && !process.waitForFinished(2500)) {
++        process.kill();
++        process.waitForFinished(1500);
++    }
++}
++void CameraStream::request() {
++    if (!ready) return;
++    QJsonObject cmd{{"requestId", QString::number(generation)},
++                    {"command", selected.isNull() ? "stop" : "start"}};
++    if (!selected.isNull()) {
++        cmd["source"] = selected;
++        if (selected == "phone") cmd["host"] = host;
++    }
++    process.write(QJsonDocument(cmd).toJson(QJsonDocument::Compact) + '\n');
++}
++void CameraStream::start(const QJsonValue &source, const QString &phoneHost) {
++    stop();
++    selected = source;
++    host = phoneHost;
++    ++generation;
++    emit statusChanged("正在打开相机…");
++    if (process.state() != QProcess::NotRunning) { request(); return; }
++    ready = false;
++    buffer.clear();
++    QDir folder(qEnvironmentVariable("POSELAB_CAMERA_DIR", "modules/camera"));
++    const QString script = folder.absoluteFilePath("camera_runner.py");
++#ifdef Q_OS_WIN
++    const QString venv = ".venv/Scripts/python.exe";
++#else
++    const QString venv = ".venv/bin/python";
++#endif
++    const QString python = qEnvironmentVariable("POSELAB_PYTHON", folder.absoluteFilePath(venv));
++    if (!QFileInfo::exists(script)) {
++        emit statusChanged("找不到 camera_runner.py，请设置 POSELAB_CAMERA_DIR");
++        return;
++    }
++    process.start(python, {script});
++}
++void CameraStream::stop() {
++    ++generation;
++    selected = QJsonValue(QJsonValue::Null);
++    accepting = false;
++    session.clear();
++    lastId = lastMs = -1;
++    stale.stop();
++    request();
++}
++void CameraStream::readMessages() {
++    buffer += process.readAllStandardOutput();
++    qsizetype offset = 0;
++    auto invalid = [this] {
++        accepting = false;
++        process.kill();
++        emit statusChanged("相机数据格式错误");
++    };
++    while (buffer.size() - offset >= 4) {
++        const char *start = buffer.constData() + offset;
++        const auto len = qFromBigEndian<quint32>(start);
++        if (!len || len > 65536) return invalid();
++        if (buffer.size() - offset < 4 + len) break;
++        const auto h = QJsonDocument::fromJson(QByteArray::fromRawData(start + 4, len)).object();
++        const auto bytes = h["payloadLength"].toInteger(-1);
++        if (h["version"].toInt() != 1 || bytes < 0 || bytes > 32 * 1024 * 1024) return invalid();
++        const auto total = 4 + len + bytes;
++        if (buffer.size() - offset < total) break;
++        const auto type = h["type"].toString();
++        const auto pixels = reinterpret_cast<const uchar *>(start + 4 + len);
++        const bool ours = h["requestId"].toString() == QString::number(generation);
++        if (type == "ready") { ready = true; request(); }
++        else if (type == "ack" && ours) accepting = h["command"] == "start";
++        else if (type == "pairing" && ours) {
++            const auto qr = QImage::fromData(pixels, bytes, "PNG");
++            if (qr.isNull()) return invalid();
++            emit pairingReady(qr);
++        } else if ((type == "error" && ours) || (type == "status" && accepting)) {
++            stale.stop();
++            emit statusChanged(h["message"].toString());
++        } else if (type == "frame" && accepting) {
++            const int w = h["width"].toInt(), height = h["height"].toInt();
++            const qint64 stride = h["stride"].toInteger(-1);
++            if (w <= 0 || height <= 0 || stride != qint64(w)*3 || stride > bytes ||
++                stride*height != bytes || h["pixelFormat"] != "BGR8") return invalid();
++            const QString sid = h["sessionId"].toString();
++            const auto id = h["sourceFrameId"].toInteger(-1), ms = h["timestampMs"].toInteger(-1);
++            if (sid.isEmpty() || id < 0 || ms < 0 ||
++                (session == sid && (id <= lastId || ms <= lastMs))) return invalid();
++            session = sid;
++            lastId = id;
++            lastMs = ms;
++            stale.start(550);
++            emit frameReady(QImage(pixels, w, height, stride, QImage::Format_BGR888).copy(), sid, id, ms);
++        }
++        offset += total;
++    }
++    buffer.remove(0, offset);
++}
++}
+diff --git a/motiondetecter/modules/ui/adapters/CameraStream.h b/motiondetecter/modules/ui/adapters/CameraStream.h
+new file mode 100644
+index 0000000..db8ff19
+--- /dev/null
++++ b/motiondetecter/modules/ui/adapters/CameraStream.h
+@@ -0,0 +1,30 @@
++#pragma once
++#include <QImage>
++#include <QJsonValue>
++#include <QProcess>
++#include <QTimer>
++
++namespace ui {
++class CameraStream : public QObject {
++    Q_OBJECT
++  public:
++    explicit CameraStream(QObject *parent = nullptr);
++    ~CameraStream() override;
++    void start(const QJsonValue &source, const QString &phoneHost = {});
++    void stop();
++  signals:
++    void frameReady(const QImage &image, const QString &sessionId, qint64 sourceFrameId, qint64 timestampMs);
++    void statusChanged(const QString &message);
++    void pairingReady(const QImage &qr);
++  private:
++    QProcess process;
++    QTimer stale;
++    QByteArray buffer;
++    QJsonValue selected;
++    QString host, session;
++    qint64 generation = 0, lastId = -1, lastMs = -1;
++    bool ready = false, accepting = false;
++    void request();
++    void readMessages();
++};
++}
+diff --git a/motiondetecter/modules/ui/pages/RealtimePage.cpp b/motiondetecter/modules/ui/pages/RealtimePage.cpp
+index 2d2c0d3..0d1a7b6 100644
+--- a/motiondetecter/modules/ui/pages/RealtimePage.cpp
++++ b/motiondetecter/modules/ui/pages/RealtimePage.cpp
+@@ -5,6 +5,8 @@
+ #include <QComboBox>
+ #include <QHBoxLayout>
+ #include <QProgressBar>
++#include <QInputDialog>
++#include <QNetworkInterface>
+ #include <QSignalBlocker>
+ namespace ui {
+ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
+@@ -122,15 +124,44 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
+     QStringList states = {"站立", "蹲底", "起身"};
+     for (int i = 0; i < m_samples.size(); i++)
+         source->addItem("交接样例 · " + states.value(i), i);
++    source->addItem("电脑摄像头", -2);
++    source->addItem("手机扫码", -3);
++    source->setAccessibleName("画面来源");
+     controls->addWidget(source);
+-    connect(source, &QComboBox::currentIndexChanged, this, [this, source] {
+-        m_sampleIndex = source->currentData().toInt();
+-        refresh();
+-    });
+     controls->addStretch();
+     auto note = m_sourceNote = label("静态参考图 · 无真实视频流", true);
+     note->setObjectName("realtimeSourceNote");
+     controls->addWidget(note);
++    camera = new CameraStream(this);
++    connect(camera, &CameraStream::frameReady, this, [this, note](const QImage &img, const QString &, qint64, qint64) {
++        video->showCameraImage(img);
++        note->setText(QString("实时画面 · %1×%2").arg(img.width()).arg(img.height()));
++    });
++    connect(camera, &CameraStream::pairingReady, this, [this, note](const QImage &qr) {
++        m_pairing = qr;
++        video->showCameraImage(qr, true);
++        note->setText("请用手机扫码");
++    });
++    connect(camera, &CameraStream::statusChanged, this, [this, note](const QString &message) {
++        video->showCameraStatus(message);
++        if (!m_pairing.isNull()) video->showCameraImage(m_pairing, true);
++        note->setText(message);
++    });
++    connect(source, &QComboBox::currentIndexChanged, this, [this, source, note, bar, hint] {
++        camera->stop();
++        m_started = false;
++        m_pairing = {};
++        m_sampleIndex = source->currentData().toInt();
++        const bool live = m_sampleIndex < -1;
++        video->setCameraMode(live);
++        bar->setVisible(!live);
++        hint->setVisible(!live);
++        m_record->setVisible(!live);
++        note->setText(live ? "等待开始采集" : "姿态样例");
++        emit cameraModeChanged(live);
++        refresh();
++        if (live) toggleCamera();
++    });
+     auto fit = button("", "videoFit");
+     fit->setIcon(icon("expand"));
+     fit->setToolTip("切换完整画面 / 填满裁剪");
+@@ -139,7 +170,10 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
+     connect(fit, &QPushButton::toggled, video, [this](bool v) { video->setCover(!v); });
+     controls->addWidget(fit);
+     root->addWidget(footer);
+-    connect(m_detect, &QPushButton::clicked, controller, &DetectionController::toggleDetection);
++    connect(m_detect, &QPushButton::clicked, this, [this, controller] {
++        if (m_sampleIndex < -1) toggleCamera();
++        else controller->toggleDetection();
++    });
+     connect(m_record, &QPushButton::clicked, controller, &DetectionController::toggleRecording);
+     connect(s, &AppState::deviceChanged, this, &RealtimePage::refresh);
+     connect(s, &AppState::detectionChanged, this, &RealtimePage::refresh);
+@@ -151,7 +185,41 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
+     connect(realtime, &RealtimeController::changed, this, &RealtimePage::refresh);
+     refresh();
+ }
++void RealtimePage::toggleCamera() {
++    if (m_started) {
++        camera->stop();
++        m_pairing = {};
++        m_started = false;
++        emit camera->statusChanged("已停止采集");
++    } else {
++        if (m_sampleIndex == -3) {
++            QStringList addresses;
++            for (const auto &a : QNetworkInterface::allAddresses())
++                if (a.protocol() == QAbstractSocket::IPv4Protocol && !a.isLoopback())
++                    addresses.append(a.toString());
++            bool ok = false;
++            m_phoneHost = QInputDialog::getItem(this, "手机扫码", "手机可访问的电脑 Wi-Fi 地址",
++                                                addresses, qMax(0, addresses.indexOf(m_phoneHost)), true, &ok);
++            if (!ok || m_phoneHost.isEmpty()) return;
++        }
++        m_started = true;
++        camera->start(m_sampleIndex == -3 ? QJsonValue("phone") : QJsonValue(0), m_phoneHost);
++    }
++    refresh();
++}
+ void RealtimePage::refresh() {
++    if (m_sampleIndex < -1 && m_realtime->enabled()) {
++        m_source->setCurrentIndex(0);
++        return;
++    }
++    if (m_sampleIndex < -1) {
++        for (const auto &pair : m_angleValues) pair.second->setText("—");
++        m_detect->setText(m_started ? "停止采集" : "开始采集");
++        m_detect->setEnabled(true);
++        m_confidence->setText(QString::number(m_state->config.confidence, 'f', 2));
++        video->setMirror(m_state->config.mirror);
++        return;
++    }
+     core::PoseResult pose = m_sampleIndex >= 0 && m_sampleIndex < m_samples.size()
+                                 ? m_samples[m_sampleIndex]
+                                 : VideoView::referencePose();
+diff --git a/motiondetecter/modules/ui/pages/RealtimePage.h b/motiondetecter/modules/ui/pages/RealtimePage.h
+index eeb64b9..d1a0e5c 100644
+--- a/motiondetecter/modules/ui/pages/RealtimePage.h
++++ b/motiondetecter/modules/ui/pages/RealtimePage.h
+@@ -1,5 +1,6 @@
+ #pragma once
+ #include "app/AppState.h"
++#include "modules/ui/adapters/CameraStream.h"
+ #include "modules/ui/controllers/Controllers.h"
+ #include "modules/ui/widgets/VideoView.h"
+ #include "modules/ui/controllers/RealtimeController.h"
+@@ -14,6 +15,9 @@ class RealtimePage : public QWidget {
+   public:
+     RealtimePage(AppState *, DetectionController *, RealtimeController *, QWidget *parent = nullptr);
+     VideoView *video;
++    CameraStream *camera;
++  signals:
++    void cameraModeChanged(bool live);
+ 
+   private:
+     AppState *m_state;
+@@ -26,6 +30,10 @@ class RealtimePage : public QWidget {
+     QVector<QPair<core::JointAngle, QLabel *>> m_angleValues;
+     QVector<core::PoseResult> m_samples;
+     int m_sampleIndex = -1;
++    bool m_started = false;
++    QString m_phoneHost;
++    QImage m_pairing;
++    void toggleCamera();
+     void refresh();
+ };
+ } // namespace ui
+diff --git a/motiondetecter/modules/ui/widgets/VideoView.cpp b/motiondetecter/modules/ui/widgets/VideoView.cpp
+index a2abdbb..b1050aa 100644
+--- a/motiondetecter/modules/ui/widgets/VideoView.cpp
++++ b/motiondetecter/modules/ui/widgets/VideoView.cpp
+@@ -78,6 +78,21 @@ void VideoView::setCover(bool c) {
+     m_cover = c;
+     update();
+ }
++void VideoView::setCameraMode(bool enabled) {
++    m_cameraMode = enabled;
++    setAccessibleName(enabled ? "实时摄像头画面" : "姿态样例画面");
++    showCameraStatus({});
++}
++void VideoView::showCameraImage(const QImage &image, bool qr) {
++    m_cameraImage = image;
++    m_qr = qr;
++    update();
++}
++void VideoView::showCameraStatus(const QString &message) {
++    m_cameraImage = {};
++    m_cameraStatus = message;
++    update();
++}
+ QRectF VideoView::imageRect() const {
+     if (m_image.isNull())
+         return {};
+@@ -100,6 +115,19 @@ void VideoView::paintEvent(QPaintEvent *) {
+     QPainterPath clip;
+     clip.addRoundedRect(rect(), m_playback ? 14 : 0, m_playback ? 14 : 0);
+     p.setClipPath(clip);
++    if (m_cameraMode) {
++        if (m_cameraImage.isNull()) {
++            p.setPen(Qt::white);
++            p.drawText(rect(), Qt::AlignCenter | Qt::TextWordWrap, m_cameraStatus);
++        } else {
++            QSize size = m_cameraImage.size();
++            if (!m_qr || size.width() > width() || size.height() > height())
++                size.scale(this->size(), !m_qr && m_cover ? Qt::KeepAspectRatioByExpanding : Qt::KeepAspectRatio);
++            if (!m_qr && m_mirror) { p.translate(width(), 0); p.scale(-1, 1); }
++            p.drawImage(QRect(QPoint((width()-size.width())/2, (height()-size.height())/2), size), m_cameraImage);
++        }
++        return;
++    }
+     if (!m_available) {
+         p.setPen(Muted);
+         p.drawText(rect(), Qt::AlignCenter, m_sourceNote.isEmpty()
+diff --git a/motiondetecter/modules/ui/widgets/VideoView.h b/motiondetecter/modules/ui/widgets/VideoView.h
+index d7f89eb..608c7de 100644
+--- a/motiondetecter/modules/ui/widgets/VideoView.h
++++ b/motiondetecter/modules/ui/widgets/VideoView.h
+@@ -19,6 +19,9 @@ class VideoView : public QWidget {
+     QPointF mapPoint(const QPointF &) const;
+     void setCover(bool cover);
+     void setReferenceImageEnabled(bool enabled);
++    void setCameraMode(bool enabled);
++    void showCameraImage(const QImage &image, bool qr = false);
++    void showCameraStatus(const QString &message);
+ 
+   protected:
+     void paintEvent(QPaintEvent *) override;
+@@ -26,6 +29,9 @@ class VideoView : public QWidget {
+ 
+   private:
+     QImage m_image;
++    QImage m_cameraImage;
++    QString m_cameraStatus;
++    bool m_cameraMode = false, m_qr = false;
+     QString m_sourceNote;
+     core::PoseResult m_pose;
+     bool m_reference = true;
+diff --git a/motiondetecter/tests/ui_tests.cpp b/motiondetecter/tests/ui_tests.cpp
+index de0e1b5..efb89b7 100644
+--- a/motiondetecter/tests/ui_tests.cpp
++++ b/motiondetecter/tests/ui_tests.cpp
+@@ -2,6 +2,7 @@
+ #include "modules/ui/adapters/AnalysisM0Adapter.h"
+ #include "modules/ui/adapters/PoseSampleReader.h"
+ #include "modules/ui/pages/DetectionConfigPage.h"
++#include "modules/ui/pages/RealtimePage.h"
+ #include "modules/ui/theme/Theme.h"
+ #include "modules/ui/widgets/ChartView.h"
+ #include "modules/ui/widgets/Controls.h"
+@@ -9,6 +10,7 @@
+ #include <QButtonGroup>
+ #include <QComboBox>
+ #include <QFile>
++#include <QPainter>
+ #include <QSignalSpy>
+ #include <QTemporaryDir>
+ #include <QtTest>
+@@ -45,6 +47,60 @@ class UiTests : public QObject {
+             c->onPoseReady(livePose(start + i * 200, angles[i]), token);
+     }
+   private slots:
++    void cameraInRealtimePage() {
++        if (!qEnvironmentVariableIsSet("POSELAB_TEST_CAMERA"))
++            QSKIP("Set POSELAB_TEST_CAMERA to enable the physical camera test");
++        QTemporaryDir dir;
++        MainWindow window(dir.path());
++        window.show();
++        auto page = window.findChild<RealtimePage *>();
++        auto source = page->findChild<QComboBox *>("poseSampleSource");
++        auto toggle = page->findChild<QPushButton *>("toggleDetection");
++        int count = 0;
++        QString session;
++        QImage last;
++        qint64 id = -1, ms = -1;
++        connect(page->camera, &CameraStream::frameReady, this,
++                [&](const QImage &image, const QString &sid, qint64 seq, qint64 stamp) {
++            QVERIFY(!sid.isEmpty());
++            QVERIFY(seq > id && stamp > ms);
++            QVERIFY(session.isEmpty() || sid == session);
++            session = sid;
++            last = image;
++            id = seq;
++            ms = stamp;
++            ++count;
++        });
++        source->setCurrentIndex(source->findData(-2));
++        QString previous;
++        for (int run = 0; run < 2; ++run) {
++            QTRY_VERIFY_WITH_TIMEOUT(count >= 30, 15000);
++            QVERIFY(session != previous);
++            previous = session;
++            const auto size = page->video->size();
++            QSize drawn = last.size().scaled(size, Qt::KeepAspectRatioByExpanding);
++            QImage expected(size, QImage::Format_ARGB32);
++            QPainter painter(&expected);
++            if (window.state()->config.mirror) { painter.translate(size.width(),0); painter.scale(-1,1); }
++            painter.drawImage(QRect(QPoint((size.width()-drawn.width())/2, (size.height()-drawn.height())/2), drawn), last);
++            painter.end();
++            const QImage actual = page->video->grab().toImage();
++            for (int x : {1, 2, 3})
++                QCOMPARE(actual.pixelColor(size.width()*x/4, size.height()/2),
++                         expected.pixelColor(size.width()*x/4, size.height()/2));
++            qInfo() << "P1 rendered" << count << "frames" << last.size() << session.left(8);
++            QTest::mouseClick(toggle, Qt::LeftButton);
++            int stopped = count;
++            QTest::qWait(200);
++            QCOMPARE(count, stopped);
++            if (!run) {
++                count = 0; id = ms = -1; session.clear();
++                QTest::mouseClick(toggle, Qt::LeftButton);
++            }
++        }
++        source->setCurrentIndex(0);
++        QVERIFY(page->findChild<QPushButton *>("toggleRecording")->isVisible());
++    }
+     void realtimeStagesCountAndPageShareInput() {
+         QTemporaryDir dir;
+         MainWindow w(dir.path());
+@@ -474,7 +530,7 @@ class UiTests : public QObject {
+         MainWindow w(dir.path());
+         auto source = w.findChild<QComboBox *>("poseSampleSource");
+         QVERIFY(source);
+-        QCOMPARE(source->count(), 4);
++        QCOMPARE(source->count(), 6);
+         source->setCurrentIndex(1);
+         bool zeroFound = false;
+         for (auto l : w.pages()->widget(0)->findChildren<QLabel *>())
