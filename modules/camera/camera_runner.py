@@ -89,6 +89,9 @@ def main():
                         capture = CaptureConfig(**command.get("capture", {}))
                         capture.validate()
                         if source == "phone":
+                            adaptive = command.get("adaptiveQuality", True)
+                            if not isinstance(adaptive, bool):
+                                raise ValueError("adaptiveQuality 应为布尔值")
                             host = str(ipaddress.ip_address(command["host"]))
                             candidate = PhoneServer(engine, Path(__file__).parent / "runtime",
                                                     host, command.get("port", 8443))
@@ -101,8 +104,10 @@ def main():
                             phone.start()
                             import qrcode
                             qr = io.BytesIO()
-                            qrcode.make(phone.url).save(qr, format="PNG")
-                            send("pairing", qr.getvalue(), url=phone.url, caPath=str(phone.ca_path),
+                            pairing = (f"{phone.url}&width={capture.width}&height={capture.height}"
+                                       f"&fps={capture.fps}&adaptive={int(adaptive)}")
+                            qrcode.make(pairing).save(qr, format="PNG")
+                            send("pairing", qr.getvalue(), url=pairing, caPath=str(phone.ca_path),
                                  requestId=request)
                         else:
                             engine.start(source, capture)
@@ -147,11 +152,13 @@ def main():
                     continue
                 send("frame", memoryview(packet.source_bgr).cast("B"), sessionId=session,
                      sourceFrameId=last_id, timestampMs=stamp, width=width, height=height,
-                     stride=width * 3, pixelFormat="BGR8", sourceToOutput=packet.source_to_output.tolist(),
+                     stride=width * 3, pixelFormat="BGR8", captureFps=engine.stats()["fps"],
+                     sourceToOutput=packet.source_to_output.tolist(),
                      outputSize=[packet.image.shape[1], packet.image.shape[0]], configRevision=packet.config_revision)
             elif result.status not in ("timeout", "session_changed"):
                 if result.status != last_status:
-                    send("status", state=result.status, sessionId=session, message=result.message)
+                    message = "等待手机扫码连接" if phone and result.status == "not_running" else result.message
+                    send("status", state=result.status, sessionId=session, message=message)
                     last_status = result.status
                 if phone:
                     # The phone service accepts a new peer without restarting the worker.

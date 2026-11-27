@@ -1,9 +1,19 @@
 "use strict";
 const $ = id => document.getElementById(id);
-const token = new URLSearchParams(location.hash.slice(1)).get("token");
+const pairing = new URLSearchParams(location.hash.slice(1));
+const token = pairing.get("token");
 let stream = null, pc = null, session = null, generation = 0, reconnectTimer = null;
 let statsTimer = null, retries = 0, active = false, connecting = false, lastAdapt = 0;
 const presets = {1080:{width:1920,height:1080,frameRate:30},720:{width:1280,height:720,frameRate:30},480:{width:854,height:480,frameRate:20}};
+const width = Number(pairing.get("width")), height = Number(pairing.get("height")), fps = Number(pairing.get("fps"));
+if (Number.isInteger(width) && width >= 16 && width <= 3840 &&
+    Number.isInteger(height) && height >= 16 && height <= 2160 &&
+    Number.isInteger(fps) && fps >= 1 && fps <= 60) {
+  presets.desktop = {width, height, frameRate:fps};
+  $("quality").add(new Option("电脑设置 · " + width + "×" + height + " · " + fps + " fps", "desktop"));
+  $("quality").value = "desktop";
+  $("adaptive").checked = pairing.get("adaptive") !== "0";
+}
 const status = text => { $("status").textContent = text; };
 function controls(running) {
   $("start").disabled = running; $("stop").disabled = !running;
@@ -78,7 +88,8 @@ async function updateStats() {
     report.forEach(s => { if (s.type === "remote-inbound-rtp" && s.kind === "video" && (s.fractionLost > .08 || s.roundTripTime > .3)) weak = true; });
     if (weak && settings.height > 480) {
       lastAdapt = Date.now();
-      await stream.getVideoTracks()[0].applyConstraints({width:{ideal:854},height:{ideal:480},frameRate:{ideal:20,max:20}});
+      const limit = Math.min(20, presets[$("quality").value].frameRate);
+      await stream.getVideoTracks()[0].applyConstraints({width:{ideal:Math.min(854,settings.width)},height:{ideal:480},frameRate:{ideal:limit,max:limit}});
       status("检测到网络波动，已请求降低采集质量。实际效果取决于手机支持情况。");
     }
   } catch (_) { /* Browser statistics and constraint support vary. */ }

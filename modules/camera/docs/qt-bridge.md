@@ -2,7 +2,7 @@
 
 ## 六页主程序中的 P1 联调
 
-相机代码在 camera-4.2，P1 页面基于陈柯睿分支 feat/chenkerui-ui-stage1 的提交 823175a。随附的 [P1 接入改动](p1-ui.patch) 可应用到该版本的仓库根目录。先用 `git apply --check <补丁路径>` 检查，再用 `git apply <补丁路径>` 应用。相机模块仍需单独安装 Python 依赖。
+相机代码在 camera-4.2，主程序基于陈柯睿分支 feat/chenkerui-ui-stage1 的提交 823175a。随附的 [主程序接入补丁](p1-ui.patch) 包含 P1、P2、P4 和 P6 的改动。请在该版本的仓库根目录用 `git apply --check <补丁路径>` 检查，再用 `git apply <补丁路径>` 应用。相机模块需单独安装 Python 依赖。
 
 用 Qt Creator 打开主程序 motiondetecter/CMakeLists.txt，选择 Qt 6 桌面 Kit。在运行环境中将 POSELAB_CAMERA_DIR 设为包含 camera_runner.py 的相机模块绝对路径。默认使用模块里的 .venv；如使用其他解释器，可设置 POSELAB_PYTHON 为该解释器的绝对路径。打开 P1，在底部画面来源选择「电脑摄像头」或「手机扫码」。手机模式需选择手机能访问的电脑地址。通过「停止采集」释放设备，点击「开始采集」重新开始。
 
@@ -11,6 +11,14 @@
 给姿态模块的图像入口是 ui::CameraStream::frameReady(image, sessionId, sourceFrameId, timestampMs)。保留源帧信息，以便将姿态对应回相同画面。实时姿态结果的消费入口及会话 token 约定见 UI 分支的 docs/P1实时提示联调交接.md。
 
 后续在正式 P1 完成实体手机复测。手机经同一 Wi-Fi 连接两次，各接收 30 帧 720×1280 画面，断开事件和新会话均已核对。
+
+## 从 P2 连接相机，在 P6 设置参数
+
+1. 在 P6「摄像头与推流」选择目标分辨率、目标帧率和手机弱网降质开关。选择后自动保存，在下一次启动采集时生效。
+2. 在 P2「相机连接」点「连接电脑摄像头」，或点「连接手机」并选择电脑的 Wi-Fi 地址。手机连同一局域网，扫码后保留「电脑设置」预设，允许摄像头权限并开始推流。
+3. P2 显示收到的图像尺寸和电脑端按收帧时间计算的帧率。设备支持的模式、手机方向及网络会影响实测值。切换到 P1 可预览或录制同一会话。从任一页停止采集会同时停止两页的数据。
+
+2026-11-28 在 P6 选择 640 × 480、15 fps 后，从 P2 分别连接了电脑摄像头和实体手机。电脑收到 30 帧 640 × 480 画面，P2 显示 15.1 fps。手机竖屏收到 30 帧 480 × 640 画面，P2 显示 14.8 fps。两次通过 P2 断开后，状态和指标均清空，未再收到画面。
 
 ## 从 P1 录制 MP4
 
@@ -60,7 +68,7 @@ stdin 每行是一条 UTF-8 JSON 命令。程序启动先发 ready。Qt 应持�
 {"command":"stop","requestId":"c"}
 ~~~
 
-source 可为非负设备编号、视频路径、demo 或 phone。手机命令还需 host 字段，port 默认 8443。capture 用于本地设备或演示源。configure 替换整套预处理配置，未指定字段取默认值。原始像素始终按原方向发送。命令返回 ack 或 error，带回 requestId。start 的 ack 表示请求已受理，收到首个 frame 才有实际画面。
+source 可为非负设备编号、视频路径、demo 或 phone。手机命令还需 host 字段，port 默认 8443。capture 提供采集目标。手机配对码将目标值和 adaptiveQuality（布尔值，默认 true）传给手机网页。configure 替换整套预处理配置，未指定字段取默认值。原始像素始终按原方向发送。命令返回 ack 或 error，带回 requestId。start 的 ack 表示请求已受理，收到首个 frame 才有实际画面。
 
 stdout 每条消息依次包含 4 字节大端无符号头长度、UTF-8 JSON 头、payloadLength 字节载荷。接收端最多接受 64 KiB 的头和 32 MiB 的载荷。一次读取可能只有半条消息，也可能有多条。所有头包含 version、type、payloadLength。frame 携带连续排列的 BGR8 原始像素；pairing 携带二维码 PNG，头含 url 和公开证书 caPath；ready、ack、status、error 的载荷为空。
 
@@ -69,6 +77,7 @@ stdout 每条消息依次包含 4 字节大端无符号头长度、UTF-8 JSON �
 | sessionId / sourceFrameId | 采集会话及源帧号。慢消费者可跳帧。推理结果应透传这两个值，用于对齐画面 |
 | timestampMs | 从该次采集会话建立至该帧进入本机图像处理的单调毫秒。换会话时重新计时；相同毫秒保留先发送的帧。P1 超时计时应锚定同一时间轴 |
 | width / height / stride / pixelFormat | 原图宽、高、每行字节数和 BGR8。stride 等于宽乘 3。可构造 QImage::Format_BGR888；跨线程或保留数据时须持有独立缓冲 |
+| captureFps | 电脑采集模块近期的实测收帧率。刚连接时为 0，界面显示「测量中」 |
 | sourceToOutput / outputSize / configRevision | 原图像素到 Python 处理图的 3×3 变换、处理图尺寸和配置版本。模型若直接使用原图，应使用自身的坐标变换 |
 
 手动停止以 stop 的 ack 为准；视频结束发 end_of_stream，设备故障发 error 状态，手机离线发 disconnected。手机服务打开后首次连接前也可能收到 not_running。无新帧期间由 Qt 定时检查超时。重连以新帧的 sessionId 切换会话并清除旧骨架。电脑故障后可重新发送 start。示例只保留最新画面；正式 P1 可在帧解析后把同一个源帧同时提交给 VideoView 和姿态模块。

@@ -29,6 +29,18 @@ index dc9b419..e784c13 100644
  qt_add_executable(motiondetecter MACOSX_BUNDLE WIN32 main.cpp)
  target_link_libraries(motiondetecter PRIVATE motion_ui)
  set_target_properties(motiondetecter PROPERTIES MACOSX_BUNDLE_BUNDLE_NAME PoseLab
+diff --git a/motiondetecter/app/AppState.h b/motiondetecter/app/AppState.h
+index 9cad141..99d2ac2 100644
+--- a/motiondetecter/app/AppState.h
++++ b/motiondetecter/app/AppState.h
+@@ -7,6 +7,7 @@ enum class PageId { Realtime, Devices, DetectionConfig, Playback, Analysis, Sett
+ struct UiConfig {
+     float confidence = .50f, smoothing = .60f;
+     bool interpolate = true, nose = false, mirror = false;
++    bool adaptiveQuality = true;
+     QString resolution = "1920 × 1080";
+     int fps = 30, threads = 4;
+     QString storagePath;
 diff --git a/motiondetecter/main.cpp b/motiondetecter/main.cpp
 index 5f3d914..8a6268a 100644
 --- a/motiondetecter/main.cpp
@@ -59,7 +71,7 @@ index 5f3d914..8a6268a 100644
          if (parser.isSet("replay-report")) {
              QObject::connect(w.replay(), &ui::PoseReplay::finished, &w, [&] {
 diff --git a/motiondetecter/mainwindow.cpp b/motiondetecter/mainwindow.cpp
-index 07703c5..c677785 100644
+index 07703c5..304e126 100644
 --- a/motiondetecter/mainwindow.cpp
 +++ b/motiondetecter/mainwindow.cpp
 @@ -101,10 +101,19 @@ MainWindow::MainWindow(const QString &directory, QWidget *parent) : QMainWindow(
@@ -67,12 +79,13 @@ index 07703c5..c677785 100644
      m_pages = new QStackedWidget;
      m_pages->setObjectName("pages");
 -    m_pages->addWidget(new RealtimePage(m_state, m_detection, m_realtime));
+-    m_pages->addWidget(new DevicePage(m_state, m_devices));
 +    auto realtime = new RealtimePage(m_state, m_detection, m_realtime);
 +    m_pages->addWidget(realtime);
 +    connect(realtime, &RealtimePage::cameraModeChanged, this, [this](bool live) {
 +        m_backendStatus->setText(live ? "摄像头 · 等待姿态服务" : "参考图 · 未接入推理");
 +    });
-     m_pages->addWidget(new DevicePage(m_state, m_devices));
++    m_pages->addWidget(new DevicePage(m_state, m_devices, realtime));
      m_pages->addWidget(new DetectionConfigPage(m_state, m_settings));
 -    m_pages->addWidget(new PlaybackPage(m_state, m_sessions));
 +    auto playback = new PlaybackPage(m_state, m_sessions);
@@ -86,10 +99,10 @@ index 07703c5..c677785 100644
      right->addWidget(m_pages, 1);
 diff --git a/motiondetecter/modules/ui/adapters/CameraStream.cpp b/motiondetecter/modules/ui/adapters/CameraStream.cpp
 new file mode 100644
-index 0000000..d69f757
+index 0000000..00ae5ad
 --- /dev/null
 +++ b/motiondetecter/modules/ui/adapters/CameraStream.cpp
-@@ -0,0 +1,133 @@
+@@ -0,0 +1,140 @@
 +#include "CameraStream.h"
 +#include <QDir>
 +#include <QFileInfo>
@@ -136,9 +149,15 @@ index 0000000..d69f757
 +                    {"command", selected.isNull() ? "stop" : "start"}};
 +    if (!selected.isNull()) {
 +        cmd["source"] = selected;
++        cmd["capture"] = capture;
++        cmd["adaptiveQuality"] = adaptiveQuality;
 +        if (selected == "phone") cmd["host"] = host;
 +    }
 +    process.write(QJsonDocument(cmd).toJson(QJsonDocument::Compact) + '\n');
++}
++void CameraStream::setCaptureSettings(QSize size, int fps, bool adaptive) {
++    capture = {{"width",size.width()},{"height",size.height()},{"fps",fps}};
++    adaptiveQuality = adaptive;
 +}
 +void CameraStream::start(const QJsonValue &source, const QString &phoneHost) {
 +    stop();
@@ -217,6 +236,7 @@ index 0000000..d69f757
 +            lastMs = ms;
 +            stale.start(550);
 +            emit frameReady(QImage(pixels, w, height, stride, QImage::Format_BGR888).copy(), sid, id, ms);
++            if (h.contains("captureFps")) emit captureMeasured(QSize(w,height), h["captureFps"].toDouble(), sid);
 +        }
 +        offset += total;
 +    }
@@ -225,10 +245,10 @@ index 0000000..d69f757
 +}
 diff --git a/motiondetecter/modules/ui/adapters/CameraStream.h b/motiondetecter/modules/ui/adapters/CameraStream.h
 new file mode 100644
-index 0000000..dd56dc6
+index 0000000..8f0e913
 --- /dev/null
 +++ b/motiondetecter/modules/ui/adapters/CameraStream.h
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,38 @@
 +#pragma once
 +#include <QImage>
 +#include <QJsonValue>
@@ -244,18 +264,22 @@ index 0000000..dd56dc6
 +    ~CameraStream() override;
 +    void start(const QJsonValue &source, const QString &phoneHost = {});
 +    void stop();
++    void setCaptureSettings(QSize size, int fps, bool adaptive);
 +    void startRecording(const QString &directory);
 +    void stopRecording();
 +  signals:
 +    void frameReady(const QImage &image, const QString &sessionId, qint64 sourceFrameId, qint64 timestampMs);
 +    void statusChanged(const QString &message);
 +    void pairingReady(const QImage &qr);
++    void captureMeasured(QSize size, double fps, const QString &session);
 +    void recordingChanged(const QJsonObject &result);
 +  private:
 +    QProcess process;
 +    QTimer stale;
 +    QByteArray buffer;
 +    QJsonValue selected;
++    QJsonObject capture;
++    bool adaptiveQuality = true;
 +    QString host, session;
 +    qint64 generation = 0, lastId = -1, lastMs = -1;
 +    bool ready = false, accepting = false;
@@ -440,6 +464,145 @@ index 0000000..a98c7be
 +    int now() const;
 +};
 +}
+diff --git a/motiondetecter/modules/ui/controllers/Controllers.cpp b/motiondetecter/modules/ui/controllers/Controllers.cpp
+index 1389fd6..76d8fa1 100644
+--- a/motiondetecter/modules/ui/controllers/Controllers.cpp
++++ b/motiondetecter/modules/ui/controllers/Controllers.cpp
+@@ -18,6 +18,7 @@ QJsonObject UiConfig::toJson() const {
+             {"interpolate", interpolate},
+             {"nose", nose},
+             {"mirror", mirror},
++            {"adaptiveQuality", adaptiveQuality},
+             {"resolution", resolution},
+             {"fps", fps},
+             {"threads", threads},
+@@ -35,6 +36,7 @@ bool UiConfig::fromJson(const QJsonObject &o, UiConfig &out, QString &error) {
+     c.interpolate = o.value("interpolate").toBool(true);
+     c.nose = o.value("nose").toBool(false);
+     c.mirror = o.value("mirror").toBool(false);
++    c.adaptiveQuality = o.value("adaptiveQuality").toBool(true);
+     c.resolution = o.value("resolution").toString();
+     c.fps = o.value("fps").toInt();
+     c.threads = o.value("threads").toInt();
+@@ -123,7 +125,7 @@ bool SettingsController::apply(const UiConfig &config) {
+     m_state->config = validated;
+     m_error.clear();
+     emit m_state->configChanged();
+-    emit feedback("界面样例配置已保存，重启后保留；尚未下发真实设备或模型", true);
++    emit feedback("配置已保存。采集参数下次启动相机时生效。", true);
+     return true;
+ }
+ DeviceController::DeviceController(AppState *s, QObject *p) : QObject(p), m_state(s) {}
+diff --git a/motiondetecter/modules/ui/pages/DevicePage.cpp b/motiondetecter/modules/ui/pages/DevicePage.cpp
+index 12f220d..a3f4ae6 100644
+--- a/motiondetecter/modules/ui/pages/DevicePage.cpp
++++ b/motiondetecter/modules/ui/pages/DevicePage.cpp
+@@ -2,11 +2,77 @@
+ #include "modules/ui/theme/Theme.h"
+ #include "modules/ui/widgets/Controls.h"
+ #include <QGridLayout>
++#include <QTabWidget>
++#include "RealtimePage.h"
+ namespace ui {
+-DevicePage::DevicePage(AppState *s, DeviceController *c, QWidget *p)
++DevicePage::DevicePage(AppState *s, DeviceController *c, RealtimePage *p1, QWidget *p)
+     : QWidget(p), m_state(s), m_controller(c) {
+     setObjectName("page");
+-    auto root = new QHBoxLayout(this);
++    auto page = new QVBoxLayout(this);
++    auto tabs = new QTabWidget;
++    page->addWidget(tabs);
++    auto actual = new QWidget;
++    tabs->addTab(actual, "相机连接");
++    auto live = new QHBoxLayout(actual);
++    live->setContentsMargins(24,24,24,24);
++    auto pairing = new CardWidget("手机配对", actual);
++    auto qr = label("点击「连接手机」生成二维码", true);
++    qr->setObjectName("liveDeviceQR");
++    qr->setAlignment(Qt::AlignCenter);
++    qr->setMinimumSize(265,265);
++    pairing->body->addWidget(qr);
++    pairing->body->addWidget(label("手机和电脑连接同一 Wi-Fi，用手机浏览器扫码。", true));
++    pairing->body->addStretch();
++    live->addWidget(pairing, 1);
++    auto details = new CardWidget("采集设备", actual);
++    auto deviceName = title("未连接");
++    deviceName->setObjectName("liveDeviceName");
++    auto status = label("选择电脑摄像头或手机开始采集", true);
++    status->setObjectName("liveDeviceStatus");
++    auto metrics = label("—", true);
++    metrics->setObjectName("liveDeviceMetrics");
++    details->body->addWidget(deviceName);
++    details->body->addWidget(status);
++    details->body->addWidget(row("实际画面 / 采集帧率",metrics));
++    auto pcButton = button("连接电脑摄像头", "liveConnectPC");
++    auto phoneButton = button("连接手机", "liveConnectPhone");
++    auto end = button("断开连接", "liveDisconnectDevice");
++    end->setEnabled(false);
++    details->body->addWidget(pcButton);
++    details->body->addWidget(phoneButton);
++    details->body->addWidget(end);
++    details->body->addStretch();
++    live->addWidget(details, 1);
++    connect(pcButton, &QPushButton::clicked, p1, [p1] { p1->connectCamera(false); });
++    connect(phoneButton, &QPushButton::clicked, p1, [p1] { p1->connectCamera(true); });
++    connect(end, &QPushButton::clicked, p1, &RealtimePage::disconnectCamera);
++    connect(p1, &RealtimePage::captureSourceChanged, this, [=](const QString &name) {
++        deviceName->setText(name.isEmpty() ? "未连接" : name);
++        qr->setText("点击「连接手机」生成二维码");
++        metrics->setText("—");
++        status->setText(name.isEmpty() ? "已断开" : "正在连接");
++        end->setEnabled(!name.isEmpty());
++    });
++    connect(p1->camera, &CameraStream::pairingReady, this, [=](const QImage &img) {
++        qr->setPixmap(QPixmap::fromImage(img).scaled(260,260,Qt::KeepAspectRatio,Qt::FastTransformation));
++        status->setText("等待手机扫码");
++    });
++    connect(p1->camera, &CameraStream::statusChanged, this, [=](const QString &text) {
++        status->setText(text);
++        metrics->setText("—");
++    });
++    connect(p1->camera, &CameraStream::captureMeasured, this, [=](QSize size, double fps, const QString &) {
++        status->setText("已连接");
++        QString rate = fps > 0 ? QString::number(fps,'f',1) + " fps" : QString("测量中");
++        metrics->setText(QString("%1 × %2 / %3").arg(size.width()).arg(size.height()).arg(rate));
++    });
++    connect(s, &AppState::deviceChanged, this, [=] {
++        pcButton->setEnabled(!s->realtimeInput);
++        phoneButton->setEnabled(!s->realtimeInput);
++    });
++    auto samples = new QWidget;
++    tabs->addTab(samples, "样例设备");
++    auto root = new QHBoxLayout(samples);
+     root->setContentsMargins(24, 24, 24, 24);
+     root->setSpacing(24);
+     auto pair = new CardWidget({}, this, 24);
+@@ -17,7 +83,7 @@ DevicePage::DevicePage(AppState *s, DeviceController *c, QWidget *p)
+     pair->body->addWidget(heading);
+     pair->body->addWidget(new PairingPlaceholder, 0, Qt::AlignHCenter);
+     auto intro = label(
+-        "手机连接服务尚未交付，当前展示配对入口。\n此占位区域不能用于扫描连接真实手机。", true);
++        "这里展示样例设备。连接真实相机请切换到「相机连接」。", true);
+     intro->setWordWrap(true);
+     intro->setStyleSheet("color:#A1A1AA;font-size:12px;");
+     pair->body->addWidget(intro);
+diff --git a/motiondetecter/modules/ui/pages/DevicePage.h b/motiondetecter/modules/ui/pages/DevicePage.h
+index a27586d..aac346f 100644
+--- a/motiondetecter/modules/ui/pages/DevicePage.h
++++ b/motiondetecter/modules/ui/pages/DevicePage.h
+@@ -5,10 +5,11 @@
+ #include <QPushButton>
+ #include <QWidget>
+ namespace ui {
++class RealtimePage;
+ class DevicePage : public QWidget {
+     Q_OBJECT
+   public:
+-    DevicePage(AppState *, DeviceController *, QWidget *parent = nullptr);
++    DevicePage(AppState *, DeviceController *, RealtimePage *, QWidget *parent = nullptr);
+ 
+   private:
+     AppState *m_state;
 diff --git a/motiondetecter/modules/ui/pages/PlaybackPage.cpp b/motiondetecter/modules/ui/pages/PlaybackPage.cpp
 index f6cd02d..13ce762 100644
 --- a/motiondetecter/modules/ui/pages/PlaybackPage.cpp
@@ -653,7 +816,7 @@ index b2dfcf2..5f2f76e 100644
      void refresh();
  };
 diff --git a/motiondetecter/modules/ui/pages/RealtimePage.cpp b/motiondetecter/modules/ui/pages/RealtimePage.cpp
-index 2d2c0d3..6d92563 100644
+index 2d2c0d3..3eae0b9 100644
 --- a/motiondetecter/modules/ui/pages/RealtimePage.cpp
 +++ b/motiondetecter/modules/ui/pages/RealtimePage.cpp
 @@ -5,6 +5,11 @@
@@ -668,7 +831,7 @@ index 2d2c0d3..6d92563 100644
  #include <QSignalBlocker>
  namespace ui {
  RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
-@@ -122,15 +127,56 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
+@@ -122,15 +127,57 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
      QStringList states = {"站立", "蹲底", "起身"};
      for (int i = 0; i < m_samples.size(); i++)
          source->addItem("交接样例 · " + states.value(i), i);
@@ -712,6 +875,7 @@ index 2d2c0d3..6d92563 100644
 +    });
 +    connect(source, &QComboBox::currentIndexChanged, this, [this, source, note, bar, hint] {
 +        camera->stop();
++        emit captureSourceChanged({});
 +        m_started = false;
 +        m_pairing = {};
 +        m_sampleIndex = source->currentData().toInt();
@@ -729,7 +893,7 @@ index 2d2c0d3..6d92563 100644
      auto fit = button("", "videoFit");
      fit->setIcon(icon("expand"));
      fit->setToolTip("切换完整画面 / 填满裁剪");
-@@ -139,8 +185,42 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
+@@ -139,8 +186,42 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
      connect(fit, &QPushButton::toggled, video, [this](bool v) { video->setCover(!v); });
      controls->addWidget(fit);
      root->addWidget(footer);
@@ -774,7 +938,7 @@ index 2d2c0d3..6d92563 100644
      connect(s, &AppState::deviceChanged, this, &RealtimePage::refresh);
      connect(s, &AppState::detectionChanged, this, &RealtimePage::refresh);
      connect(s, &AppState::configChanged, this, [this, confidenceBar] {
-@@ -151,7 +231,48 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
+@@ -151,7 +232,64 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
      connect(realtime, &RealtimeController::changed, this, &RealtimePage::refresh);
      refresh();
  }
@@ -784,12 +948,23 @@ index 2d2c0d3..6d92563 100644
 +    m_record->setEnabled(!m_recordPending && (m_cameraFrame || m_recordingCamera));
 +    m_record->setToolTip("将相机原图编码为 H.264，并保存逐帧时间索引");
 +}
++void RealtimePage::connectCamera(bool phone) {
++    if (!m_source->isEnabled()) return;
++    int index = m_source->findData(phone ? -3 : -2);
++    if (index < 0) return;
++    if (m_source->currentIndex() != index) m_source->setCurrentIndex(index);
++    else if (!m_started) toggleCamera();
++}
++void RealtimePage::disconnectCamera() {
++    if (m_sampleIndex < -1 && m_started) toggleCamera();
++}
 +void RealtimePage::toggleCamera() {
 +    if (m_started) {
 +        camera->stop();
 +        m_pairing = {};
 +        m_started = false;
 +        emit camera->statusChanged("已停止采集");
++        emit captureSourceChanged({});
 +    } else {
 +        if (m_sampleIndex == -3) {
 +            QStringList addresses;
@@ -797,11 +972,16 @@ index 2d2c0d3..6d92563 100644
 +                if (a.protocol() == QAbstractSocket::IPv4Protocol && !a.isLoopback())
 +                    addresses.append(a.toString());
 +            bool ok = false;
-+            m_phoneHost = QInputDialog::getItem(this, "手机扫码", "手机可访问的电脑 Wi-Fi 地址",
++            m_phoneHost = QInputDialog::getItem(window(), "手机扫码", "手机可访问的电脑 Wi-Fi 地址",
 +                                                addresses, qMax(0, addresses.indexOf(m_phoneHost)), true, &ok);
 +            if (!ok || m_phoneHost.isEmpty()) return;
 +        }
 +        m_started = true;
++        const auto &config = m_state->config;
++        auto parts = config.resolution.split(QChar(0x00d7));
++        camera->setCaptureSettings(QSize(parts.value(0).trimmed().toInt(), parts.value(1).trimmed().toInt()),
++                                   config.fps, config.adaptiveQuality);
++        emit captureSourceChanged(m_sampleIndex == -3 ? "手机摄像头" : "电脑摄像头");
 +        camera->start(m_sampleIndex == -3 ? QJsonValue("phone") : QJsonValue(0), m_phoneHost);
 +    }
 +    refresh();
@@ -824,7 +1004,7 @@ index 2d2c0d3..6d92563 100644
                                  ? m_samples[m_sampleIndex]
                                  : VideoView::referencePose();
 diff --git a/motiondetecter/modules/ui/pages/RealtimePage.h b/motiondetecter/modules/ui/pages/RealtimePage.h
-index eeb64b9..f6dbac5 100644
+index eeb64b9..90e9bf0 100644
 --- a/motiondetecter/modules/ui/pages/RealtimePage.h
 +++ b/motiondetecter/modules/ui/pages/RealtimePage.h
 @@ -1,5 +1,6 @@
@@ -834,18 +1014,21 @@ index eeb64b9..f6dbac5 100644
  #include "modules/ui/controllers/Controllers.h"
  #include "modules/ui/widgets/VideoView.h"
  #include "modules/ui/controllers/RealtimeController.h"
-@@ -14,6 +15,10 @@ class RealtimePage : public QWidget {
+@@ -14,6 +15,13 @@ class RealtimePage : public QWidget {
    public:
      RealtimePage(AppState *, DetectionController *, RealtimeController *, QWidget *parent = nullptr);
      VideoView *video;
 +    CameraStream *camera;
++    void connectCamera(bool phone);
++    void disconnectCamera();
 +  signals:
 +    void cameraModeChanged(bool live);
++    void captureSourceChanged(const QString &source);
 +    void openRecordingRequested(const QString &path);
  
    private:
      AppState *m_state;
-@@ -26,6 +31,13 @@ class RealtimePage : public QWidget {
+@@ -26,6 +34,13 @@ class RealtimePage : public QWidget {
      QVector<QPair<core::JointAngle, QLabel *>> m_angleValues;
      QVector<core::PoseResult> m_samples;
      int m_sampleIndex = -1;
@@ -859,6 +1042,82 @@ index eeb64b9..f6dbac5 100644
      void refresh();
  };
  } // namespace ui
+diff --git a/motiondetecter/modules/ui/pages/SettingsPage.cpp b/motiondetecter/modules/ui/pages/SettingsPage.cpp
+index b4b79dc..6cdb675 100644
+--- a/motiondetecter/modules/ui/pages/SettingsPage.cpp
++++ b/motiondetecter/modules/ui/pages/SettingsPage.cpp
+@@ -54,17 +54,17 @@ SettingsPage::SettingsPage(AppState *s, SettingsController *c, QWidget *p)
+     m_fps->setObjectName("captureFps");
+     for (int v : {15, 25, 30, 60})
+         m_fps->addItem(QString::number(v) + " fps", v);
+-    auto protocol = button("WebRTC（待接入）");
+-    protocol->setEnabled(false);
+-    auto degrade = new ToggleField("弱网时自动降低分辨率");
+-    degrade->setEnabled(false);
+-    m_mirror = new ToggleField("镜像参考画面");
++    auto protocol = label("WebRTC");
++    auto degrade = m_adaptive = new ToggleField("手机弱网时降低采集质量");
++    degrade->setObjectName("cameraAdaptiveQuality");
++    m_mirror = new ToggleField("镜像画面");
+     m_mirror->setObjectName("mirrorVideo");
+-    camera->body->addWidget(row("采集分辨率（样例参数）", m_resolution));
+-    camera->body->addWidget(row("采集帧率（样例参数）", m_fps));
++    camera->body->addWidget(row("目标分辨率", m_resolution));
++    camera->body->addWidget(row("目标帧率", m_fps));
++    camera->body->addWidget(label("下次启动采集时生效，实测值见设备连接页。", true));
+     camera->body->addWidget(row("推流协议", protocol));
+     camera->body->addWidget(row("弱网时自动降低分辨率", degrade));
+-    camera->body->addWidget(row("镜像参考画面", m_mirror));
++    camera->body->addWidget(row("镜像预览画面", m_mirror));
+     left->addWidget(camera);
+     left->addStretch();
+     columns->addLayout(left, 1);
+@@ -117,7 +117,7 @@ SettingsPage::SettingsPage(AppState *s, SettingsController *c, QWidget *p)
+     rightWidget->setFixedWidth(340);
+     columns->addWidget(rightWidget);
+     root->addLayout(columns, 1);
+-    m_status = label("设置自动保存到本机；设备与推理参数尚未下发真实服务。", true);
++    m_status = label("设置自动保存到本机。", true);
+     m_status->setWordWrap(true);
+     root->addWidget(m_status);
+     scroll->setWidget(content);
+@@ -126,6 +126,7 @@ SettingsPage::SettingsPage(AppState *s, SettingsController *c, QWidget *p)
+     connect(m_fps, &QComboBox::currentIndexChanged, this, [this] { apply(); });
+     connect(m_threads, &QSpinBox::valueChanged, this, [this] { apply(); });
+     connect(m_mirror, &QAbstractButton::toggled, this, [this] { apply(); });
++    connect(m_adaptive, &QAbstractButton::toggled, this, [this] { apply(); });
+     connect(m_path, &QPushButton::clicked, this, [this] {
+         auto path = QFileDialog::getExistingDirectory(this, "选择样例文件保存目录",
+                                                       m_state->config.storagePath);
+@@ -163,6 +164,7 @@ void SettingsPage::load() {
+     m_fps->setCurrentIndex(m_fps->findData(m_state->config.fps));
+     m_threads->setValue(m_state->config.threads);
+     m_mirror->setChecked(m_state->config.mirror);
++    m_adaptive->setChecked(m_state->config.adaptiveQuality);
+     QString path = m_state->config.storagePath;
+     m_path->setText(QFontMetrics(m_path->font()).elidedText(path, Qt::ElideMiddle, 145));
+     m_path->setToolTip(path);
+@@ -176,6 +178,7 @@ void SettingsPage::apply() {
+     c.fps = m_fps->currentData().toInt();
+     c.threads = m_threads->value();
+     c.mirror = m_mirror->isChecked();
++    c.adaptiveQuality = m_adaptive->isChecked();
+     m_controller->apply(c);
+ }
+ } // namespace ui
+diff --git a/motiondetecter/modules/ui/pages/SettingsPage.h b/motiondetecter/modules/ui/pages/SettingsPage.h
+index f18648a..c75a17e 100644
+--- a/motiondetecter/modules/ui/pages/SettingsPage.h
++++ b/motiondetecter/modules/ui/pages/SettingsPage.h
+@@ -15,7 +15,7 @@ class SettingsPage : public QWidget {
+     SettingsController *m_controller;
+     QComboBox *m_resolution, *m_fps;
+     QSpinBox *m_threads;
+-    ToggleField *m_mirror;
++    ToggleField *m_mirror, *m_adaptive;
+     QPushButton *m_path;
+     QLabel *m_status;
+     bool m_loading = false;
 diff --git a/motiondetecter/modules/ui/widgets/VideoView.cpp b/motiondetecter/modules/ui/widgets/VideoView.cpp
 index a2abdbb..b1050aa 100644
 --- a/motiondetecter/modules/ui/widgets/VideoView.cpp
@@ -930,7 +1189,7 @@ index d7f89eb..608c7de 100644
      core::PoseResult m_pose;
      bool m_reference = true;
 diff --git a/motiondetecter/tests/ui_tests.cpp b/motiondetecter/tests/ui_tests.cpp
-index de0e1b5..3780ec5 100644
+index de0e1b5..c5fc64a 100644
 --- a/motiondetecter/tests/ui_tests.cpp
 +++ b/motiondetecter/tests/ui_tests.cpp
 @@ -2,6 +2,9 @@
@@ -953,7 +1212,7 @@ index de0e1b5..3780ec5 100644
  #include <QSignalSpy>
  #include <QTemporaryDir>
  #include <QtTest>
-@@ -45,6 +51,203 @@ class UiTests : public QObject {
+@@ -45,6 +51,254 @@ class UiTests : public QObject {
              c->onPoseReady(livePose(start + i * 200, angles[i]), token);
      }
    private slots:
@@ -1059,6 +1318,57 @@ index de0e1b5..3780ec5 100644
 +        QTest::mouseClick(sample, Qt::LeftButton);
 +        QVERIFY(page->chart->isVisible());
 +    }
++    void settingsReachDevicePage_data() {
++        QTest::addColumn<bool>("phone");
++        QTest::newRow("desktop") << false;
++        QTest::newRow("phone") << true;
++    }
++    void settingsReachDevicePage() {
++        QFETCH(bool, phone);
++        const QString host = qEnvironmentVariable("POSELAB_DEVICE_PHONE_HOST");
++        if ((phone && host.isEmpty()) || (!phone && !qEnvironmentVariableIsSet("POSELAB_TEST_CAMERA")))
++            QSKIP("Requires the selected physical camera");
++        QTemporaryDir dir;
++        MainWindow window(dir.path());
++        window.show();
++        window.navigate(PageId::Settings);
++        window.findChild<QComboBox *>("captureResolution")->setCurrentText("640 × 480");
++        auto fps = window.findChild<QComboBox *>("captureFps");
++        fps->setCurrentIndex(fps->findData(15));
++        QCOMPARE(window.state()->config.fps, 15);
++        QCOMPARE(window.state()->config.resolution, QString("640 × 480"));
++        window.navigate(PageId::Devices);
++        auto camera = window.findChild<RealtimePage *>()->camera;
++        QSignalSpy frames(camera, &CameraStream::frameReady);
++        auto metrics = window.findChild<QLabel *>("liveDeviceMetrics");
++        if (phone) {
++            connect(camera, &CameraStream::pairingReady, &window, [&](const QImage &image) {
++                QVERIFY(!image.isNull());
++                const QString path = qEnvironmentVariable("POSELAB_TEST_QR_FILE");
++                if (!path.isEmpty()) QVERIFY(image.save(path));
++                qInfo() << "P2 pairing QR ready";
++            });
++            QTimer::singleShot(100, [host] {
++                auto dialog = qobject_cast<QInputDialog *>(QApplication::activeModalWidget());
++                QVERIFY(dialog);
++                dialog->setTextValue(host);
++                dialog->accept();
++            });
++        }
++        window.findChild<QPushButton *>(phone ? "liveConnectPhone" : "liveConnectPC")->click();
++        QTRY_VERIFY_WITH_TIMEOUT(frames.count() >= 30, phone ? 600000 : 30000);
++        QTRY_VERIFY_WITH_TIMEOUT(metrics->text().contains("fps"), 5000);
++        qInfo().noquote() << "P2 received" << frames.count() << "frames;" << metrics->text();
++        const QSize size = qvariant_cast<QImage>(frames.last().first()).size();
++        QVERIFY(metrics->text().startsWith(QString("%1 × %2").arg(size.width()).arg(size.height())));
++        if (!phone) QCOMPARE(size, QSize(640,480));
++        window.findChild<QPushButton *>("liveDisconnectDevice")->click();
++        QCOMPARE(window.findChild<QLabel *>("liveDeviceName")->text(), QString("未连接"));
++        QCOMPARE(metrics->text(), QString("—"));
++        int stopped = frames.count();
++        QTest::qWait(250);
++        QCOMPARE(frames.count(), stopped);
++    }
 +    void phoneInRealtimePage() {
 +        const QString host = qEnvironmentVariable("POSELAB_TEST_PHONE_HOST");
 +        if (host.isEmpty()) QSKIP("Requires a phone on the same Wi-Fi");
@@ -1157,7 +1467,7 @@ index de0e1b5..3780ec5 100644
      void realtimeStagesCountAndPageShareInput() {
          QTemporaryDir dir;
          MainWindow w(dir.path());
-@@ -474,7 +677,7 @@ class UiTests : public QObject {
+@@ -474,7 +728,7 @@ class UiTests : public QObject {
          MainWindow w(dir.path());
          auto source = w.findChild<QComboBox *>("poseSampleSource");
          QVERIFY(source);
