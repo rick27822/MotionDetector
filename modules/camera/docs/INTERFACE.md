@@ -1,24 +1,22 @@
 # 4.2 摄像头与图像处理模块：接口说明
 
-版本：1.1；检查日期：2026-11-05。
+接口版本 1.1，联调说明更新于 2026-11-28。
 
 ## 先看应该交哪个文件
 
-- 团队使用 Python：交 `camera_interface.py` 和本说明。文件包含配置类型、帧结构、状态结果和 Protocol；可单独导入阅读，无须安装 OpenCV。实际运行必须使用完整项目的 `camera_module.CameraEngine`。
-- 团队要求 C++ `.h`：交 `camera_module.h`。它是 C++11/OpenCV 的完整接口约定，**没有对应 C++ 实现，不可直接链接运行，也不是 Python 程序的头文件**。
-- 目前可运行版本采用 Python。C++ 与 Python 的命名和时间单位不同，不能直接混用。团队最终技术栈仍须统一。
-
-`camera_interface.py` 与完整项目中的 `camera_module/interface.py` 内容一致。集成时以包内版本为准；不要在两个地方分别改出不同定义。接口版本见 `API_VERSION` / `kCameraApiVersion`。
+- Qt/C++ 主程序通过 QProcess 启动 Python 采集程序。在 `CameraStream::frameReady(image, sessionId, sourceFrameId, timestampMs)` 接收原图。时间戳是从本次采集会话开始计算的单调毫秒。姿态模块应保留会话、帧号和时间戳。[Qt 接入步骤](qt-bridge.md)
+- Python 调用方从 `camera_module` 导入 `CameraEngine`。配置类型、帧结构和取帧结果见 [Python 接口定义](../camera_module/interface.py)。
+- 需要讨论原生 C++ 移植时，可参考 [camera_module.h](camera_module.h)。当前可运行的采集实现由 Python 提供。
 
 ## 模块范围与覆盖情况
 
 | 能力 | 当前交付 |
 |---|---|
-| 电脑摄像头启动、停止、重启、编号选择 | 已实现；模拟失败与释放已测，实体摄像头待验收 |
+| 电脑摄像头启动、停止、重启、编号选择 | P1 已用实体摄像头验证启停与重启。P2 按 P6 的设置收到 30 帧 640 × 480 画面，实测 15.1 fps |
 | 视频文件读取、按源帧率播放、文件结束 | 已实现并用实际 AVI 文件验证 |
 | 无摄像头演示输入 | 已实现，明确标注合成画面 |
-| 手机扫码、HTTPS、WebRTC、配对与断开 | 已实现；本机合成视频编解码验证通过 |
-| 手机断线重连、弱网降质量 | 已实现浏览器逻辑，实际手机与弱网待验收 |
+| 手机扫码、HTTPS、WebRTC、配对与断开 | P2 已用实体手机扫码并收到 30 帧 480 × 640 竖屏画面，实测 14.8 fps，断开后停止收帧 |
+| 手机断线重连、弱网降质量 | P1 已实测手机断开并重新接入，收到了新的采集会话。真实弱网下的自动降质效果待测 |
 | 目标分辨率和帧率配置 | 已实现，设备实际值以返回画面/统计为准 |
 | 旋转、镜像、等比例缩放、居中补边 | 已实现并验证，补边灰度值0..255可配置 |
 | RGB/BGR/GRAY、uint8/float32 [0,1] | 已实现并验证 |
@@ -30,7 +28,7 @@
 | 单帧导出 | 原图PNG、处理图PNG、原精度NPY、JSON元数据 |
 | GUI配置保存、原图/处理图切换 | 已实现 |
 
-一次只使用一个视频源。设计图中的自动发现所有手机、设备型号/电量列表、跨网络连接没有实现；浏览器接入需要用户先扫码。姿态模型、骨架绘制、角度计算、动作评分、完整录像回放及报告由相应模块实现。这里提供原图和坐标信息供它们接入；最新帧接口允许丢弃旧帧，不承诺无损连续录像。
+一次使用一个视频源。手机通过同一局域网扫码接入。姿态模块计算关键点和关节角度，P1 消费姿态结果并显示提示。实时预览取最新帧，录像使用独立编码队列。P1 可录制 MP4，P4 可回放录像并查到源帧号。
 
 ## 公共调用对应表
 
@@ -62,7 +60,7 @@ Python 手机服务为 `camera_module.phone.PhoneServer(engine, runtime_dir, hos
 - `frame_id`：从1开始，在同一引擎对象生命周期内持续递增，重启不清零。`session_frames` 是当前会话计数；停止或外部断开后清零。
 - `session_id`：每次开始生成。不要将上一会话的推理结果画到新会话画面上。若算法是异步的，还应对齐 `frame_id` 和 `config_revision`。
 - `config_revision`：每次成功configure加1，构造时为0。已开始处理的帧可能在configure返回后以旧版本发布；如必须等待新设置，读取到目标版本的帧后再推理。
-- Python时间/timeout均为秒；C++timeout为毫秒，接收时钟字段为微秒，`media_time_seconds`为秒。`processing_ms`两者均为毫秒。
+- Qt 运行接口的 `timestampMs` 是本次采集会话内的毫秒数。Python 的 timeout、monotonic_at 和 media_time 使用秒，processing_ms 使用毫秒。原生 C++ 移植草案里的接收时钟字段使用微秒，仅适用于该头文件。
 - 本机接收Unix时间用于记录，单调时钟用于新鲜度。它们不是手机曝光时间，不能直接用来计算单向网络延迟。`media_time`未知时为None，C++使用有效标志。
 - 坐标采用像素中心，左上角像素中心是(0,0)。矩阵包含缩放时的半像素偏移；模型输出0..1坐标时先按模型文档变成像素坐标再逆变换。超出原图的点不自动裁剪，由算法结合可见性过滤。
 
@@ -113,9 +111,11 @@ with CameraEngine(PreprocessConfig(256, 256, color="RGB")) as camera:
 
 完整示例：`examples/algorithm_consumer.py`，默认五秒结束；`--video 视频路径`可读视频，`--save-to 目录`可导出第一帧。
 
-## 本分支文件位置
+## 提交到队友仓库
 
-模块目录为 `modules/camera/`，C++ 头文件在 `docs/camera_module.h`，Python 接口在 `camera_module/interface.py`。从模块目录运行安装、演示和测试脚本。
+相机模块位于团队仓库的 `camera-4.2` 分支，目录是 `modules/camera/`。主程序改动通过目录内的 `docs/p1-ui.patch` 交付。适用的 UI 基线和安装步骤见 [Qt 联调说明](qt-bridge.md)。
+
+忽略 `.venv/`、`runtime/`、`__pycache__/`、本地证书私钥、调试截图；项目内已有 `.gitignore`。发布包不含这些内容。
 
 ## 集成前只需确认的项目约定
 
