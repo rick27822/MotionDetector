@@ -26,6 +26,14 @@
 
 进程命令为 startRecording（directory 为目录）和 stopRecording。返回类型 recording，state 为 started、finished 或 failed。finished 的 path 指向已发布的 MP4；失败附 message。Python 调用方可使用 CameraEngine.start_recording(directory) 和 stop_recording() 获取相同的结果数据。
 
+## 在 P4 回放录像
+
+在 P1 完成录制后点「打开录像」，主程序会切换到 P4。也可以在 P4 点「打开本地录像」，选择同一录制目录中的 video.mp4 或 recording.json。移动或分享录像时保留整个目录，包括 frames.jsonl。命令行可用 `motiondetecter --recording <video.mp4 的路径>` 直接打开。
+
+播放、暂停、进度条与 0.5× 至 2× 倍速共用原页面的控件。页面显示当前解码图像的源帧号及它在采集会话中的时间。拖动时选取显示时间不晚于目标位置的最后一帧，按视频 PTS 与逐帧索引匹配。切换右侧样例会话可回到合成角度时间轴。真实录像当前提供视频和取帧元数据，逐帧姿态需另行接入。
+
+解码进程 playback_runner.py 与 camera_runner.py 位于同一目录，共用同一个 Python 环境及 PyAV 依赖。
+
 ## 独立预览窗口
 
 2026-11-26 在 Windows 和 Qt 6.8 上完成独立接收端实测。电脑摄像头两次启停，各接收 30 帧 1280×720 的 BGR 图像；手机经局域网 WebRTC 两次接入，各接收 30 帧 720×1280 图像，观察到断开通知和新的会话编号。原模块的 21 项回归测试通过。该记录覆盖相机到 Qt 示例窗口；团队 P1、真实姿态模型和长时间运行仍需联合验证。

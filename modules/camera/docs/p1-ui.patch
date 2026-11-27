@@ -1,5 +1,5 @@
 diff --git a/motiondetecter/CMakeLists.txt b/motiondetecter/CMakeLists.txt
-index dc9b419..efae35f 100644
+index dc9b419..e784c13 100644
 --- a/motiondetecter/CMakeLists.txt
 +++ b/motiondetecter/CMakeLists.txt
 @@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
@@ -11,15 +11,16 @@ index dc9b419..efae35f 100644
  qt_standard_project_setup()
  # Layouts are built in C++ to share the same widgets and support deterministic UI tests.
  set(CMAKE_AUTOUIC OFF)
-@@ -16,6 +16,7 @@ add_library(motion_ui STATIC
+@@ -16,6 +16,8 @@ add_library(motion_ui STATIC
      modules/ui/widgets/VideoView.cpp modules/ui/widgets/VideoView.h
      modules/ui/widgets/ChartView.cpp modules/ui/widgets/ChartView.h
      modules/ui/adapters/PoseSampleReader.cpp modules/ui/adapters/PoseSampleReader.h
 +    modules/ui/adapters/CameraStream.cpp modules/ui/adapters/CameraStream.h
++    modules/ui/adapters/RecordingPlayer.cpp modules/ui/adapters/RecordingPlayer.h
      modules/ui/adapters/AnalysisM0Adapter.cpp modules/ui/adapters/AnalysisM0Adapter.h
      modules/ui/controllers/RealtimeController.cpp modules/ui/controllers/RealtimeController.h
      modules/ui/adapters/PoseReplay.cpp modules/ui/adapters/PoseReplay.h
-@@ -30,7 +31,7 @@ add_library(motion_ui STATIC
+@@ -30,7 +32,7 @@ add_library(motion_ui STATIC
      mainwindow.cpp mainwindow.h
      modules/ui/resources/ui.qrc)
  target_include_directories(motion_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -28,11 +29,40 @@ index dc9b419..efae35f 100644
  qt_add_executable(motiondetecter MACOSX_BUNDLE WIN32 main.cpp)
  target_link_libraries(motiondetecter PRIVATE motion_ui)
  set_target_properties(motiondetecter PROPERTIES MACOSX_BUNDLE_BUNDLE_NAME PoseLab
+diff --git a/motiondetecter/main.cpp b/motiondetecter/main.cpp
+index 5f3d914..8a6268a 100644
+--- a/motiondetecter/main.cpp
++++ b/motiondetecter/main.cpp
+@@ -1,4 +1,5 @@
+ #include "mainwindow.h"
++#include "modules/ui/pages/PlaybackPage.h"
+ #include "modules/ui/theme/Theme.h"
+ #include <QApplication>
+ #include <QCommandLineParser>
+@@ -32,6 +33,7 @@ int main(int argc, char *argv[]) {
+     parser.addOption({"replay", "按原始时间间隔回放姿态JSON或角度JSONL，联调P1提示", "file"});
+     parser.addOption({"replay-report", "回放结束后写入JSON结果和同名PNG截图并退出", "file"});
+     parser.addOption({"page", "启动页1~6", "number", "1"});
++    parser.addOption({"recording", "在 P4 打开 4.2 录制的 MP4", "file"});
+     parser.process(app);
+     if ((parser.isSet("replay-report") && !parser.isSet("replay")) ||
+         (parser.isSet("replay") && (parser.isSet("capture") || parser.isSet("export-samples")))) {
+@@ -46,6 +48,10 @@ int main(int argc, char *argv[]) {
+     w.setScenario(parser.value("scenario"));
+     w.navigate(static_cast<ui::PageId>(qBound(1, parser.value("page").toInt(), 6) - 1));
+     w.show();
++    if (parser.isSet("recording")) {
++        w.navigate(ui::PageId::Playback);
++        w.findChild<ui::PlaybackPage *>()->openRecording(parser.value("recording"));
++    }
+     if (parser.isSet("replay")) {
+         if (parser.isSet("replay-report")) {
+             QObject::connect(w.replay(), &ui::PoseReplay::finished, &w, [&] {
 diff --git a/motiondetecter/mainwindow.cpp b/motiondetecter/mainwindow.cpp
-index 07703c5..be11532 100644
+index 07703c5..c677785 100644
 --- a/motiondetecter/mainwindow.cpp
 +++ b/motiondetecter/mainwindow.cpp
-@@ -101,7 +101,11 @@ MainWindow::MainWindow(const QString &directory, QWidget *parent) : QMainWindow(
+@@ -101,10 +101,19 @@ MainWindow::MainWindow(const QString &directory, QWidget *parent) : QMainWindow(
      right->addWidget(top);
      m_pages = new QStackedWidget;
      m_pages->setObjectName("pages");
@@ -44,7 +74,16 @@ index 07703c5..be11532 100644
 +    });
      m_pages->addWidget(new DevicePage(m_state, m_devices));
      m_pages->addWidget(new DetectionConfigPage(m_state, m_settings));
-     m_pages->addWidget(new PlaybackPage(m_state, m_sessions));
+-    m_pages->addWidget(new PlaybackPage(m_state, m_sessions));
++    auto playback = new PlaybackPage(m_state, m_sessions);
++    m_pages->addWidget(playback);
++    connect(realtime, &RealtimePage::openRecordingRequested, this, [this, playback](const QString &path) {
++        navigate(PageId::Playback);
++        playback->openRecording(path);
++    });
+     m_pages->addWidget(new AnalysisPage(m_state, m_sessions));
+     m_pages->addWidget(new SettingsPage(m_state, m_settings));
+     right->addWidget(m_pages, 1);
 diff --git a/motiondetecter/modules/ui/adapters/CameraStream.cpp b/motiondetecter/modules/ui/adapters/CameraStream.cpp
 new file mode 100644
 index 0000000..d69f757
@@ -224,8 +263,397 @@ index 0000000..dd56dc6
 +    void readMessages();
 +};
 +}
+diff --git a/motiondetecter/modules/ui/adapters/RecordingPlayer.cpp b/motiondetecter/modules/ui/adapters/RecordingPlayer.cpp
+new file mode 100644
+index 0000000..c31619e
+--- /dev/null
++++ b/motiondetecter/modules/ui/adapters/RecordingPlayer.cpp
+@@ -0,0 +1,126 @@
++#include "RecordingPlayer.h"
++#include <QDir>
++#include <QJsonDocument>
++#include <QJsonObject>
++#include <QtEndian>
++#include <limits>
++#include <cmath>
++
++namespace ui {
++RecordingPlayer::RecordingPlayer(QObject *parent) : QObject(parent) {
++    timer.setSingleShot(true);
++    timer.setTimerType(Qt::PreciseTimer);
++    connect(&timer, &QTimer::timeout, this, [this] { target = now(); request(); });
++}
++RecordingPlayer::~RecordingPlayer() { close(); }
++void RecordingPlayer::close() {
++    timer.stop();
++    running = busy = false;
++    length = target = anchor = displayed = 0;
++    buffer.clear();
++    if (worker) {
++        disconnect(worker, nullptr, this, nullptr);
++        worker->closeWriteChannel();
++        // Decoder is read-only. Switching sessions can cancel an outstanding seek.
++        if (worker->state() != QProcess::NotRunning) {
++            worker->kill();
++            worker->waitForFinished(1000);
++        }
++        worker->deleteLater();
++        worker = nullptr;
++    }
++}
++void RecordingPlayer::fail(const QString &message) {
++    close();
++    emit failed(message);
++}
++void RecordingPlayer::open(const QString &path) {
++    close();
++    worker = new QProcess(this);
++    worker->setProcessChannelMode(QProcess::ForwardedErrorChannel);
++    connect(worker, &QProcess::readyReadStandardOutput, this, &RecordingPlayer::readMessages);
++    connect(worker, &QProcess::errorOccurred, this, [this] { fail(worker->errorString()); });
++    connect(worker, &QProcess::finished, this, [this] {
++        readMessages();
++        if (worker) fail("录像解码进程已退出");
++    });
++    QDir dir(qEnvironmentVariable("POSELAB_CAMERA_DIR", "modules/camera"));
++#ifdef Q_OS_WIN
++    const auto venv = dir.absoluteFilePath(".venv/Scripts/python.exe");
++#else
++    const auto venv = dir.absoluteFilePath(".venv/bin/python");
++#endif
++    worker->start(qEnvironmentVariable("POSELAB_PYTHON", venv),
++                  {dir.absoluteFilePath("playback_runner.py"), path});
++}
++int RecordingPlayer::now() const {
++    return int(qBound(qint64(0), anchor + qint64(clock.elapsed() * speed), qint64(length)));
++}
++void RecordingPlayer::seek(int ms) {
++    if (!length) return;
++    timer.stop();
++    anchor = target = qBound(0, ms, length);
++    clock.restart();
++    ++generation;
++    request();
++}
++void RecordingPlayer::toggle() {
++    if (!length) return;
++    running = !running;
++    seek(running && displayed == length ? 0 : displayed);
++    emit playingChanged(running);
++}
++void RecordingPlayer::setRate(double rate) {
++    int pos = running ? now() : displayed;
++    speed = rate;
++    if (running) seek(pos);
++}
++void RecordingPlayer::request() {
++    if (!worker || busy || !length) return;
++    busy = true;
++    QJsonObject cmd{{"ms",target},{"id",generation}};
++    worker->write(QJsonDocument(cmd).toJson(QJsonDocument::Compact) + '\n');
++}
++void RecordingPlayer::readMessages() {
++    buffer += worker->readAllStandardOutput();
++    while (buffer.size() >= 4) {
++        auto n = qFromBigEndian<quint32>(buffer.constData());
++        if (!n || n > 65536) return fail("无效的录像消息头");
++        if (buffer.size() < 4+n) return;
++        auto h = QJsonDocument::fromJson(buffer.mid(4,n)).object();
++        auto bytes = h["payloadLength"].toInteger(-1);
++        if (h["version"].toInt() != 1 || bytes < 0 || bytes > 32*1024*1024)
++            return fail("无效的录像载荷");
++        if (buffer.size() < 4+n+bytes) return;
++        auto type = h["type"].toString();
++        if (type == "error") return fail(h["message"].toString());
++        if (type == "opened") {
++            auto ms = h["durationMs"].toInteger();
++            if (ms <= 0 || ms > std::numeric_limits<int>::max()) return fail("录像时长无效");
++            length = int(ms);
++            emit opened(length);
++            seek(0);
++        } else if (type == "frame") {
++            busy = false;
++            if (h["requestId"].toInteger(-1) != generation) request();
++            else {
++                int w = h["width"].toInt(), ht = h["height"].toInt();
++                if (w <= 0 || ht <= 0 || w > bytes/3 || qint64(w)*3*ht != bytes)
++                    return fail("录像图像尺寸无效");
++                auto data = reinterpret_cast<const uchar *>(buffer.constData()+4+n);
++                auto img = QImage(data,w,ht,w*3,QImage::Format_BGR888).copy();
++                displayed = h["ms"].toInt();
++                emit frameReady(img, displayed, h["sourceFrameId"].toInteger(), h["timestampMs"].toInteger());
++                if (running && displayed >= length) {
++                    running = false;
++                    emit playingChanged(false);
++                } else if (running) {
++                    int delay = int(std::ceil((h["nextMs"].toInt() - now())/speed));
++                    timer.start(qMax(0,delay));
++                }
++            }
++        } else return fail("不支持的录像消息");
++        buffer.remove(0,4+n+bytes);
++    }
++}
++}
+diff --git a/motiondetecter/modules/ui/adapters/RecordingPlayer.h b/motiondetecter/modules/ui/adapters/RecordingPlayer.h
+new file mode 100644
+index 0000000..a98c7be
+--- /dev/null
++++ b/motiondetecter/modules/ui/adapters/RecordingPlayer.h
+@@ -0,0 +1,39 @@
++#pragma once
++#include <QElapsedTimer>
++#include <QImage>
++#include <QProcess>
++#include <QTimer>
++
++namespace ui {
++class RecordingPlayer : public QObject {
++    Q_OBJECT
++  public:
++    explicit RecordingPlayer(QObject *parent);
++    ~RecordingPlayer() override;
++    void open(const QString &path);
++    void close();
++    void seek(int ms);
++    void toggle();
++    void setRate(double rate);
++    int duration() const { return length; }
++    bool playing() const { return running; }
++  signals:
++    void opened(int ms);
++    void frameReady(const QImage &, int ms, qint64 sourceFrameId, qint64 captureMs);
++    void playingChanged(bool playing);
++    void failed(const QString &message);
++  private:
++    QProcess *worker = nullptr;
++    QByteArray buffer;
++    QTimer timer;
++    QElapsedTimer clock;
++    int length = 0, target = 0, anchor = 0, displayed = 0;
++    qint64 generation = 0;
++    double speed = 1.;
++    bool running = false, busy = false;
++    void request();
++    void readMessages();
++    void fail(const QString &message);
++    int now() const;
++};
++}
+diff --git a/motiondetecter/modules/ui/pages/PlaybackPage.cpp b/motiondetecter/modules/ui/pages/PlaybackPage.cpp
+index f6cd02d..13ce762 100644
+--- a/motiondetecter/modules/ui/pages/PlaybackPage.cpp
++++ b/motiondetecter/modules/ui/pages/PlaybackPage.cpp
+@@ -2,12 +2,14 @@
+ #include "modules/ui/theme/Theme.h"
+ #include "modules/ui/widgets/Controls.h"
+ #include <QResizeEvent>
++#include <QFileDialog>
+ #include <QScrollArea>
+ #include <QSignalBlocker>
+ namespace ui {
+ PlaybackPage::PlaybackPage(AppState *s, SessionController *c, QWidget *p)
+     : QWidget(p), m_state(s), m_controller(c) {
+     setObjectName("page");
++    m_player = new RecordingPlayer(this);
+     auto root = new QHBoxLayout(this);
+     root->setContentsMargins(24, 24, 24, 24);
+     root->setSpacing(20);
+@@ -41,6 +43,7 @@ PlaybackPage::PlaybackPage(AppState *s, SessionController *c, QWidget *p)
+     controls->addWidget(speed);
+     left->addLayout(controls);
+     auto curve = new CardWidget({}, this, 16);
++    m_curve = curve;
+     auto header = new QHBoxLayout;
+     header->addWidget(title("关节角度 · 时间曲线"));
+     header->addStretch();
+@@ -61,6 +64,13 @@ PlaybackPage::PlaybackPage(AppState *s, SessionController *c, QWidget *p)
+     m_count = label("", true);
+     h->addWidget(m_count);
+     sessions->body->addLayout(h);
++    auto open = button("打开本地录像", "openCameraRecording");
++    sessions->body->addWidget(open);
++    connect(open, &QPushButton::clicked, this, [this] {
++        auto path = QFileDialog::getOpenFileName(this, "打开 4.2 录像", m_state->config.storagePath,
++                                                 "4.2 录像 (video.mp4 recording.json)");
++        if (!path.isEmpty()) openRecording(path);
++    });
+     auto scroll = new QScrollArea;
+     scroll->setWidgetResizable(true);
+     auto list = new QWidget;
+@@ -73,24 +83,33 @@ PlaybackPage::PlaybackPage(AppState *s, SessionController *c, QWidget *p)
+                       "放不绘制动态骨架。",
+                       true);
+     note->setWordWrap(true);
++    m_note = note;
+     note->setStyleSheet("font-size:11px;color:#A1A1AA;");
+     sessions->body->addWidget(note);
+     root->addWidget(sessions);
+     // Static manual reference overlay; it never pretends to be a per-frame replay result.
+     video->setOverlay(true, false);
+-    connect(m_play, &QPushButton::clicked, c, &SessionController::togglePlayback);
+-    connect(video, &VideoView::playRequested, c, &SessionController::togglePlayback);
++    auto toggle = [this, c] { if (m_real) m_player->toggle(); else c->togglePlayback(); };
++    connect(m_play, &QPushButton::clicked, this, toggle);
++    connect(video, &VideoView::playRequested, this, toggle);
+     connect(speed, &QComboBox::currentIndexChanged, this,
+-            [c, speed] { c->setRate(speed->currentData().toDouble()); });
+-    connect(m_progress, &QSlider::sliderMoved, c, [c](int v) { c->seek(v); });
+-    connect(m_progress, &QSlider::sliderReleased, this,
+-            [this, c] { c->seek(m_progress->value()); });
++            [this, c, speed] {
++                auto rate = speed->currentData().toDouble();
++                c->setRate(rate);
++                m_player->setRate(rate);
++            });
++    auto seek = [this, c](int v) { if (m_real) m_player->seek(v); else c->seek(v); };
++    connect(m_progress, &QSlider::sliderMoved, this, seek);
++    connect(m_progress, &QSlider::sliderReleased, this, [this, seek] { seek(m_progress->value()); });
+     connect(m_progress, &QSlider::valueChanged, this, [this, c](int v) {
+-        if (!m_progress->isSliderDown() && v != c->position())
+-            c->seek(v);
++        if (!m_progress->isSliderDown()) {
++            if (m_real) m_player->seek(v);
++            else if (v != c->position()) c->seek(v);
++        }
+     });
+     connect(chart, &ChartView::seekRequested, c, &SessionController::seek);
+     connect(c, &SessionController::positionChanged, this, [this](qint64 t, qint64 d) {
++        if (m_real) return;
+         if (!m_progress->isSliderDown()) {
+             QSignalBlocker block(m_progress);
+             m_progress->setRange(0, int(d));
+@@ -101,14 +120,76 @@ PlaybackPage::PlaybackPage(AppState *s, SessionController *c, QWidget *p)
+         video->setPosition(t, d);
+     });
+     connect(c, &SessionController::playbackChanged, this, [this](bool playing) {
++        if (m_real) return;
+         m_play->setIcon(icon(playing ? "pause" : "play", Qt::white));
+         video->setPlaying(playing);
+     });
+     connect(s, &AppState::sessionsChanged, this, &PlaybackPage::rebuild);
+     connect(s, &AppState::sessionChanged, this, &PlaybackPage::refresh);
++    connect(m_player, &RecordingPlayer::opened, this, [this](int length) {
++        QSignalBlocker block(m_progress);
++        m_progress->setRange(0,length);
++        m_progress->setValue(0);
++    });
++    connect(m_player, &RecordingPlayer::frameReady, this, [this](const QImage &img, int ms, qint64 id, qint64 stamp) {
++        video->showCameraImage(img);
++        video->setAvailable(true);
++        m_play->setEnabled(true);
++        m_progress->setEnabled(true);
++        if (!m_progress->isSliderDown()) {
++            QSignalBlocker block(m_progress);
++            m_progress->setValue(ms);
++        }
++        m_time->setText(core::formatDuration(ms) + " / " + core::formatDuration(m_player->duration()));
++        m_note->setText(QString("源帧 %1 · 采集时间 %2 ms").arg(id).arg(stamp));
++    });
++    connect(m_player, &RecordingPlayer::playingChanged, this, [this](bool playing) {
++        m_play->setIcon(icon(playing ? "pause" : "play", Qt::white));
++    });
++    connect(m_player, &RecordingPlayer::failed, this, [this](const QString &message) {
++        video->showCameraStatus(message);
++        video->setAvailable(false);
++        m_play->setEnabled(false);
++        m_progress->setEnabled(false);
++        m_note->setText("录像读取失败");
++    });
+     rebuild();
+     refresh();
+ }
++void PlaybackPage::openRecording(const QString &path) {
++    if (m_controller->playing()) m_controller->togglePlayback();
++    m_real = true;
++    video->setCameraMode(true);
++    video->setAccessibleName("录像画面");
++    video->setCover(false);
++    video->setAvailable(false);
++    video->showCameraStatus("正在读取录像…");
++    m_curve->hide();
++    m_play->setIcon(icon("play", Qt::white));
++    m_play->setAccessibleName("播放或暂停录像");
++    m_progress->setAccessibleName("录像进度");
++    m_progress->setEnabled(false);
++    m_play->setEnabled(false);
++    { QSignalBlocker block(m_progress); m_progress->setRange(0, 0); }
++    m_time->clear();
++    m_note->setText(QFileInfo(path).absolutePath());
++    for (auto b : findChildren<QPushButton *>())
++        if (b->objectName() == "session") b->setChecked(false);
++    m_player->open(path);
++}
++void PlaybackPage::returnToSamples() {
++    if (!m_real) return;
++    m_player->close();
++    m_real = false;
++    video->setCameraMode(false);
++    video->setCover(true);
++    m_curve->show();
++    m_note->setText("合成角度样例 · 静态参考图");
++    m_play->setIcon(icon("play", Qt::white));
++    m_play->setAccessibleName("播放或暂停样例时间轴");
++    m_progress->setAccessibleName("样例播放进度");
++    refresh();
++}
+ void PlaybackPage::resizeEvent(QResizeEvent *event) {
+     QWidget::resizeEvent(event);
+     video->setMaximumHeight(qMax(260, qRound((width() - 428) * 461. / 787.)));
+@@ -137,7 +218,10 @@ void PlaybackPage::rebuild() {
+         v->addWidget(name);
+         v->addWidget(detail);
+         m_list->addWidget(b);
+-        connect(b, &QPushButton::clicked, this, [this, id = s.id] { m_controller->select(id); });
++        connect(b, &QPushButton::clicked, this, [this, id = s.id] {
++            returnToSamples();
++            m_controller->select(id);
++        });
+     }
+     if (m_state->sessions.isEmpty())
+         m_list->addWidget(label("暂无会话\n可在实时检测页创建样例会话。", true));
+@@ -145,6 +229,7 @@ void PlaybackPage::rebuild() {
+     m_count->setText(QString::number(m_state->sessions.size()) + " 条样例");
+ }
+ void PlaybackPage::refresh() {
++    if (m_real) return;
+     auto s = m_controller->current();
+     chart->setSamples(s ? s->samples : QVector<core::AngleSample>{});
+     chart->setPosition(m_controller->position());
+diff --git a/motiondetecter/modules/ui/pages/PlaybackPage.h b/motiondetecter/modules/ui/pages/PlaybackPage.h
+index b2dfcf2..5f2f76e 100644
+--- a/motiondetecter/modules/ui/pages/PlaybackPage.h
++++ b/motiondetecter/modules/ui/pages/PlaybackPage.h
+@@ -1,6 +1,7 @@
+ #pragma once
+ #include "app/AppState.h"
+ #include "modules/ui/controllers/Controllers.h"
++#include "modules/ui/adapters/RecordingPlayer.h"
+ #include "modules/ui/widgets/ChartView.h"
+ #include "modules/ui/widgets/VideoView.h"
+ #include <QComboBox>
+@@ -15,6 +16,7 @@ class PlaybackPage : public QWidget {
+     PlaybackPage(AppState *, SessionController *, QWidget *parent = nullptr);
+     VideoView *video;
+     ChartView *chart;
++    void openRecording(const QString &path);
+ 
+   protected:
+     void resizeEvent(QResizeEvent *) override;
+@@ -26,6 +28,11 @@ class PlaybackPage : public QWidget {
+     QPushButton *m_play;
+     QLabel *m_time, *m_count;
+     QVBoxLayout *m_list;
++    RecordingPlayer *m_player;
++    QWidget *m_curve;
++    QLabel *m_note;
++    bool m_real = false;
++    void returnToSamples();
+     void rebuild();
+     void refresh();
+ };
 diff --git a/motiondetecter/modules/ui/pages/RealtimePage.cpp b/motiondetecter/modules/ui/pages/RealtimePage.cpp
-index 2d2c0d3..913a6d0 100644
+index 2d2c0d3..6d92563 100644
 --- a/motiondetecter/modules/ui/pages/RealtimePage.cpp
 +++ b/motiondetecter/modules/ui/pages/RealtimePage.cpp
 @@ -5,6 +5,11 @@
@@ -240,7 +668,7 @@ index 2d2c0d3..913a6d0 100644
  #include <QSignalBlocker>
  namespace ui {
  RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
-@@ -122,15 +127,54 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
+@@ -122,15 +127,56 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
      QStringList states = {"站立", "蹲底", "起身"};
      for (int i = 0; i < m_samples.size(); i++)
          source->addItem("交接样例 · " + states.value(i), i);
@@ -258,7 +686,9 @@ index 2d2c0d3..913a6d0 100644
      controls->addWidget(note);
 +    m_recordResult = new QLabel;
 +    m_recordResult->setObjectName("cameraRecordingResult");
-+    m_recordResult->setOpenExternalLinks(true);
++    connect(m_recordResult, &QLabel::linkActivated, this, [this](const QString &url) {
++        emit openRecordingRequested(QUrl(url).toLocalFile());
++    });
 +    m_recordResult->hide();
 +    controls->addWidget(m_recordResult);
 +    camera = new CameraStream(this);
@@ -299,7 +729,7 @@ index 2d2c0d3..913a6d0 100644
      auto fit = button("", "videoFit");
      fit->setIcon(icon("expand"));
      fit->setToolTip("切换完整画面 / 填满裁剪");
-@@ -139,8 +183,42 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
+@@ -139,8 +185,42 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
      connect(fit, &QPushButton::toggled, video, [this](bool v) { video->setCover(!v); });
      controls->addWidget(fit);
      root->addWidget(footer);
@@ -344,7 +774,7 @@ index 2d2c0d3..913a6d0 100644
      connect(s, &AppState::deviceChanged, this, &RealtimePage::refresh);
      connect(s, &AppState::detectionChanged, this, &RealtimePage::refresh);
      connect(s, &AppState::configChanged, this, [this, confidenceBar] {
-@@ -151,7 +229,48 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
+@@ -151,7 +231,48 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
      connect(realtime, &RealtimeController::changed, this, &RealtimePage::refresh);
      refresh();
  }
@@ -394,7 +824,7 @@ index 2d2c0d3..913a6d0 100644
                                  ? m_samples[m_sampleIndex]
                                  : VideoView::referencePose();
 diff --git a/motiondetecter/modules/ui/pages/RealtimePage.h b/motiondetecter/modules/ui/pages/RealtimePage.h
-index eeb64b9..719e431 100644
+index eeb64b9..f6dbac5 100644
 --- a/motiondetecter/modules/ui/pages/RealtimePage.h
 +++ b/motiondetecter/modules/ui/pages/RealtimePage.h
 @@ -1,5 +1,6 @@
@@ -404,17 +834,18 @@ index eeb64b9..719e431 100644
  #include "modules/ui/controllers/Controllers.h"
  #include "modules/ui/widgets/VideoView.h"
  #include "modules/ui/controllers/RealtimeController.h"
-@@ -14,6 +15,9 @@ class RealtimePage : public QWidget {
+@@ -14,6 +15,10 @@ class RealtimePage : public QWidget {
    public:
      RealtimePage(AppState *, DetectionController *, RealtimeController *, QWidget *parent = nullptr);
      VideoView *video;
 +    CameraStream *camera;
 +  signals:
 +    void cameraModeChanged(bool live);
++    void openRecordingRequested(const QString &path);
  
    private:
      AppState *m_state;
-@@ -26,6 +30,13 @@ class RealtimePage : public QWidget {
+@@ -26,6 +31,13 @@ class RealtimePage : public QWidget {
      QVector<QPair<core::JointAngle, QLabel *>> m_angleValues;
      QVector<core::PoseResult> m_samples;
      int m_sampleIndex = -1;
@@ -499,18 +930,20 @@ index d7f89eb..608c7de 100644
      core::PoseResult m_pose;
      bool m_reference = true;
 diff --git a/motiondetecter/tests/ui_tests.cpp b/motiondetecter/tests/ui_tests.cpp
-index de0e1b5..1cd7a8c 100644
+index de0e1b5..3780ec5 100644
 --- a/motiondetecter/tests/ui_tests.cpp
 +++ b/motiondetecter/tests/ui_tests.cpp
-@@ -2,6 +2,7 @@
+@@ -2,6 +2,9 @@
  #include "modules/ui/adapters/AnalysisM0Adapter.h"
  #include "modules/ui/adapters/PoseSampleReader.h"
  #include "modules/ui/pages/DetectionConfigPage.h"
 +#include "modules/ui/pages/RealtimePage.h"
++#include "modules/ui/pages/PlaybackPage.h"
++#include <QJsonDocument>
  #include "modules/ui/theme/Theme.h"
  #include "modules/ui/widgets/ChartView.h"
  #include "modules/ui/widgets/Controls.h"
-@@ -9,6 +10,9 @@
+@@ -9,6 +12,9 @@
  #include <QButtonGroup>
  #include <QComboBox>
  #include <QFile>
@@ -520,7 +953,7 @@ index de0e1b5..1cd7a8c 100644
  #include <QSignalSpy>
  #include <QTemporaryDir>
  #include <QtTest>
-@@ -45,6 +49,138 @@ class UiTests : public QObject {
+@@ -45,6 +51,203 @@ class UiTests : public QObject {
              c->onPoseReady(livePose(start + i * 200, angles[i]), token);
      }
    private slots:
@@ -560,6 +993,71 @@ index de0e1b5..1cd7a8c 100644
 +        QVERIFY(QFile::exists(file.dir().filePath("frames.jsonl")));
 +        QVERIFY(page->findChild<QLabel *>("cameraRecordingResult")->text().contains("打开录像"));
 +        qInfo() << "P1 recorded H.264 frames" << result["frames"].toInt();
++        auto playback = window.findChild<PlaybackPage *>();
++        auto player = playback->findChild<RecordingPlayer *>();
++        QSignalSpy decoded(player, &RecordingPlayer::frameReady);
++        auto link = page->findChild<QLabel *>("cameraRecordingResult");
++        emit link->linkActivated(QUrl::fromLocalFile(file.absoluteFilePath()).toString());
++        QCOMPARE(window.currentPage(), PageId::Playback);
++        QTRY_VERIFY_WITH_TIMEOUT(!decoded.isEmpty(), 10000);
++    }
++    void recordingSeekPauseAndResume() {
++        QString path = qEnvironmentVariable("POSELAB_TEST_RECORDING");
++        if (path.isEmpty()) QSKIP("Requires a 4.2 MP4 recording");
++        QTemporaryDir dir;
++        MainWindow window(dir.path());
++        window.show();
++        window.navigate(PageId::Playback);
++        auto page = window.findChild<PlaybackPage *>();
++        auto player = page->findChild<RecordingPlayer *>();
++        auto slider = page->findChild<QSlider *>("playbackPosition");
++        auto play = page->findChild<QPushButton *>("playPause");
++        int at = -1;
++        qint64 id = -1, stamp = -1;
++        QImage last;
++        connect(player, &RecordingPlayer::frameReady, this, [&](const QImage &img, int ms, qint64 i, qint64 t) {
++            last = img; at = ms; id = i; stamp = t;
++        });
++        page->openRecording(path);
++        QTRY_COMPARE_WITH_TIMEOUT(at, 0, 10000);
++        QFile index(QFileInfo(path).dir().filePath("frames.jsonl"));
++        QVERIFY(index.open(QIODevice::ReadOnly));
++        QList<QJsonObject> rows;
++        while (!index.atEnd()) rows.append(QJsonDocument::fromJson(index.readLine()).object());
++        for (int ms : {player->duration()/2, player->duration(), 0}) {
++            slider->setValue(ms);
++            QTRY_COMPARE_WITH_TIMEOUT(at, ms, 5000);
++            auto expected = rows.first();
++            for (const auto &row : rows) {
++                if (row["pts"].toInteger() > ms*90LL) break;
++                expected = row;
++            }
++            QCOMPARE(id, expected["sourceFrameId"].toInteger());
++            QCOMPARE(stamp, expected["timestampMs"].toInteger());
++            const auto size = page->video->size();
++            QSize fitted = last.size().scaled(size, Qt::KeepAspectRatio);
++            QImage reference(size,QImage::Format_ARGB32);
++            QPainter p(&reference);
++            p.drawImage(QRect(QPoint((size.width()-fitted.width())/2,(size.height()-fitted.height())/2),fitted),last);
++            p.end();
++            const QPoint center(size.width()/2,size.height()/2);
++            QCOMPARE(page->video->grab().toImage().pixelColor(center), reference.pixelColor(center));
++            qInfo() << "P4 seek" << at << "sourceFrameId" << id << "captureMs" << stamp;
++        }
++        QTest::mouseClick(play, Qt::LeftButton);
++        QTRY_VERIFY_WITH_TIMEOUT(at > 0, 3000);
++        QTest::mouseClick(play, Qt::LeftButton);
++        int paused = at;
++        QTest::qWait(150);
++        QCOMPARE(at, paused);
++        page->findChild<QComboBox *>("playbackRate")->setCurrentIndex(3);
++        QTest::mouseClick(play, Qt::LeftButton);
++        QTRY_VERIFY_WITH_TIMEOUT(!player->playing(), player->duration()+3000);
++        QCOMPARE(at,player->duration());
++        auto sample = page->findChild<QPushButton *>("session");
++        QVERIFY(sample);
++        QTest::mouseClick(sample, Qt::LeftButton);
++        QVERIFY(page->chart->isVisible());
 +    }
 +    void phoneInRealtimePage() {
 +        const QString host = qEnvironmentVariable("POSELAB_TEST_PHONE_HOST");
@@ -659,7 +1157,7 @@ index de0e1b5..1cd7a8c 100644
      void realtimeStagesCountAndPageShareInput() {
          QTemporaryDir dir;
          MainWindow w(dir.path());
-@@ -474,7 +610,7 @@ class UiTests : public QObject {
+@@ -474,7 +677,7 @@ class UiTests : public QObject {
          MainWindow w(dir.path());
          auto source = w.findChild<QComboBox *>("poseSampleSource");
          QVERIFY(source);
