@@ -98,6 +98,7 @@ class CameraEngine:
         self._condition = threading.Condition(threading.RLock())
         self._stop = threading.Event()
         self._thread = None
+        self._recording = None
         self._latest = None
         self._sequence = 0
         self._session = ""
@@ -196,6 +197,8 @@ class CameraEngine:
     def finish_external(self, session: str, message: str = "手机已断开，可重新连接") -> None:
         with self._condition:
             if session and session == self._session and self._source == "phone":
+                if self._recording:
+                    self._recording.end("disconnected")
                 self._session = ""  # Invalidate any in-flight preprocessing.
                 self._status, self._message = "waiting", message
                 self._latest = None
@@ -228,6 +231,8 @@ class CameraEngine:
                                  matrix, config.color, config.normalize, processing_ms, original, revision,
                                  self._session_start)
             self._latest = packet
+            if self._recording:
+                self._recording.offer(packet)
             self._times.append(monotonic_at)
             self._status, self._message = "running", "正在采集"
             self._condition.notify_all()
@@ -277,12 +282,40 @@ class CameraEngine:
                     self._latest = None
                     self._condition.notify_all()
         finally:
+            with self._condition:
+                if session == self._session and self._recording:
+                    self._recording.end(self._status)
             if cap is not None:
                 cap.release()
+
+    def start_recording(self, directory):
+        from .recording import Recording
+        with self._condition:
+            if self._recording:
+                raise RuntimeError("已有录像，请先结束并读取结果")
+            if self._status != "running" or self._latest is None:
+                raise RuntimeError("请在收到相机画面后开始录像")
+            self._recording = Recording(directory, self._latest)
+            self._recording.offer(self._latest)
+            return self._recording.id
+
+    def recording_finished(self):
+        with self._condition:
+            return self._recording is not None and self._recording.done.is_set()
+
+    def stop_recording(self, reason="stopped"):
+        with self._condition:
+            recording, self._recording = self._recording, None
+            if recording:
+                recording.end(reason)
+        return recording.finish(reason) if recording else None
 
     def stop(self) -> None:
         self._stop.set()
         with self._condition:
+            recording = self._recording
+            if recording:
+                recording.end("capture_stopped")
             self._session = ""
             self._latest = None
             self._times.clear()
@@ -294,6 +327,8 @@ class CameraEngine:
             if self._thread.is_alive():
                 raise RuntimeError("设备驱动仍在退出，请稍后重试；暂不启动新的采集")
         self._thread = None
+        if recording:
+            recording.done.wait()
         with self._condition:
             self._status, self._message = "idle", "已停止采集"
             self._condition.notify_all()

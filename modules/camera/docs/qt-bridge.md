@@ -10,6 +10,22 @@
 
 给姿态模块的图像入口是 ui::CameraStream::frameReady(image, sessionId, sourceFrameId, timestampMs)。保留源帧信息，以便将姿态对应回相同画面。实时姿态结果的消费入口及会话 token 约定见 UI 分支的 docs/P1实时提示联调交接.md。
 
+后续在正式 P1 完成实体手机复测。手机经同一 Wi-Fi 连接两次，各接收 30 帧 720×1280 画面，断开事件和新会话均已核对。
+
+## 从 P1 录制 MP4
+
+选电脑或手机摄像头，等首帧出现后点「录制 MP4」，选择保存目录。点「结束录像」，待编码结束后可点「打开录像」。每次录制创建独立子目录。手机断线、切换输入或停止采集时，编码器完成当前片段。
+
+| 交付文件 | P4 和数据模块的用法 |
+| --- | --- |
+| video.mp4 | H.264、YUV420P、原始图像方向。奇数尺寸在右边或底边补一个像素 |
+| recording.json | recordingId、采集 sessionId、原图尺寸、总帧数、时间基准及结束原因 |
+| frames.jsonl | 每行一帧，含 sourceFrameId、会话单调毫秒 timestampMs、视频 pts 及可用的来源媒体时间。播放器时间（秒）等于 pts / 90000 |
+
+视频时间从第一张写入图像起算，保留实际帧间隔。P4 可按视频时间定位索引行，再用 sessionId 和 sourceFrameId 匹配姿态。角度数据由姿态服务提供。实时预览可跳过旧帧；录像从采集源独立接收。若编码跟不上，保存已编码的连续片段，endReason 为 encoder_overload；分辨率变化会结束当前片段。
+
+进程命令为 startRecording（directory 为目录）和 stopRecording。返回类型 recording，state 为 started、finished 或 failed。finished 的 path 指向已发布的 MP4；失败附 message。Python 调用方可使用 CameraEngine.start_recording(directory) 和 stop_recording() 获取相同的结果数据。
+
 ## 独立预览窗口
 
 2026-11-26 在 Windows 和 Qt 6.8 上完成独立接收端实测。电脑摄像头两次启停，各接收 30 帧 1280×720 的 BGR 图像；手机经局域网 WebRTC 两次接入，各接收 30 帧 720×1280 图像，观察到断开通知和新的会话编号。原模块的 21 项回归测试通过。该记录覆盖相机到 Qt 示例窗口；团队 P1、真实姿态模型和长时间运行仍需联合验证。

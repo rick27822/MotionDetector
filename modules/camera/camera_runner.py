@@ -48,9 +48,21 @@ def main():
     last_status = None
     session = ""
     last_ms = -1
+    recording_request = None
+
+    def finish_recording(reason):
+        nonlocal recording_request
+        try:
+            info = engine.stop_recording(reason)
+            if info:
+                send("recording", state="finished", requestId=recording_request, **info)
+        except RuntimeError as exc:
+            send("recording", state="failed", requestId=recording_request, message=str(exc))
+        recording_request = None
 
     def stop():
         nonlocal phone, active, session, last_id, last_ms, last_status
+        finish_recording("capture_stopped")
         if phone:
             phone.stop()
             phone = None
@@ -60,6 +72,8 @@ def main():
     try:
         send("ready")
         while True:
+            if engine.recording_finished():
+                finish_recording("completed")
             try:
                 command = queue.get(block=not active)
             except Empty:
@@ -97,6 +111,18 @@ def main():
                         engine.configure(PreprocessConfig(**command["processing"]))
                     elif name == "stop":
                         stop()
+                    elif name == "startRecording":
+                        try:
+                            identity = engine.start_recording(command["directory"])
+                        except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
+                            send("recording", state="failed", message=str(exc), requestId=request)
+                        else:
+                            recording_request = request
+                            send("recording", state="started", recordingId=identity, requestId=request)
+                        continue
+                    elif name == "stopRecording":
+                        finish_recording("stopped")
+                        continue
                     else:
                         raise ValueError(command.get("detail", "未知命令"))
                     send("ack", requestId=request, command=name)
@@ -131,6 +157,7 @@ def main():
                     # The phone service accepts a new peer without restarting the worker.
                     time.sleep(.035)
                 else:
+                    finish_recording(result.status)
                     active = False
     finally:
         stop()
