@@ -51,6 +51,7 @@ class CameraManager : public ICameraSource {
     DeviceInfo device;
     QImage latest;
     QString recordingId;
+    bool recordingStartPending = false;
     QString endpoint;
 };
 }

@@ -735,7 +735,7 @@ index b2dfcf2..5f2f76e 100644
      void refresh();
  };
 diff --git a/motiondetecter/modules/ui/pages/RealtimePage.cpp b/motiondetecter/modules/ui/pages/RealtimePage.cpp
-index 2d2c0d3..8e7b861 100644
+index 2d2c0d3..af6a3ce 100644
 --- a/motiondetecter/modules/ui/pages/RealtimePage.cpp
 +++ b/motiondetecter/modules/ui/pages/RealtimePage.cpp
 @@ -5,6 +5,11 @@
@@ -843,7 +843,7 @@ index 2d2c0d3..8e7b861 100644
      auto fit = button("", "videoFit");
      fit->setIcon(icon("expand"));
      fit->setToolTip("切换完整画面 / 填满裁剪");
-@@ -139,11 +210,46 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
+@@ -139,11 +210,51 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
      connect(fit, &QPushButton::toggled, video, [this](bool v) { video->setCover(!v); });
      controls->addWidget(fit);
      root->addWidget(footer);
@@ -861,8 +861,13 @@ index 2d2c0d3..8e7b861 100644
 +        } else {
 +            QString dir = QFileDialog::getExistingDirectory(this, "选择录像保存目录",
 +                QStandardPaths::writableLocation(QStandardPaths::MoviesLocation));
-+            if (dir.isEmpty() || !m_cameraFrame) return;
-+            camera->startRecording(dir);
++            if (dir.isEmpty()) return;
++            if (!m_cameraFrame || !camera->startRecording(dir)) {
++                m_recordResult->setText("录像未开始，请确认相机正在出帧且没有正在进行的录像，然后重试。");
++                m_recordResult->show();
++                refreshRecordButton();
++                return;
++            }
 +            m_recordResult->clear();
 +        }
 +        m_recordPending = true;
@@ -892,7 +897,7 @@ index 2d2c0d3..8e7b861 100644
          refresh();
          confidenceBar->setValue(qRound(m_state->config.confidence * 100));
      });
-@@ -151,11 +257,94 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
+@@ -151,11 +262,94 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
      connect(realtime, &RealtimeController::changed, this, &RealtimePage::refresh);
      refresh();
  }
@@ -988,7 +993,7 @@ index 2d2c0d3..8e7b861 100644
      if (live)
          pose = m_realtime->pose();
      if (!live) {
-@@ -179,7 +368,8 @@ void RealtimePage::refresh() {
+@@ -179,7 +373,8 @@ void RealtimePage::refresh() {
      const bool kneeValid = pose.hasAngle(core::JointAngle::LeftKnee);
      m_kneeProgress->setValue(kneeValid ? qRound(pose.angle(core::JointAngle::LeftKnee)) : 0);
      m_kneeProgress->setEnabled(kneeValid);
@@ -998,7 +1003,7 @@ index 2d2c0d3..8e7b861 100644
      video->setReferenceImageEnabled(!live && m_sampleIndex < 0);
      video->setSourceNote(live ? m_realtime->sourceName() + " · 无对应视频帧" : QString());
      for (auto pair : m_angleValues)
-@@ -191,6 +381,19 @@ void RealtimePage::refresh() {
+@@ -191,6 +386,19 @@ void RealtimePage::refresh() {
      video->setAvailable(m_state->connected && m_state->detecting);
      video->setOverlay(m_state->showSkeleton, m_state->showAngles);
      video->setMirror(m_state->config.mirror);
@@ -1018,7 +1023,7 @@ index 2d2c0d3..8e7b861 100644
      m_detect->setText(live ? (m_state->detecting ? "停止检测" : "开始检测")
                             : (m_state->detecting ? "停止样例" : "开始样例检测"));
      m_detect->setEnabled(m_state->connected);
-@@ -207,18 +410,6 @@ void RealtimePage::refresh() {
+@@ -207,18 +415,6 @@ void RealtimePage::refresh() {
          m_source->addItem(m_realtime->sourceName());
      }
      m_confidenceProgress->setVisible(!live);
@@ -1281,7 +1286,7 @@ index d7f89eb..608c7de 100644
      core::PoseResult m_pose;
      bool m_reference = true;
 diff --git a/motiondetecter/tests/ui_tests.cpp b/motiondetecter/tests/ui_tests.cpp
-index de0e1b5..e3da119 100644
+index de0e1b5..b7083d6 100644
 --- a/motiondetecter/tests/ui_tests.cpp
 +++ b/motiondetecter/tests/ui_tests.cpp
 @@ -2,6 +2,9 @@
@@ -1304,7 +1309,7 @@ index de0e1b5..e3da119 100644
  #include <QSignalSpy>
  #include <QTemporaryDir>
  #include <QtTest>
-@@ -45,6 +51,338 @@ class UiTests : public QObject {
+@@ -45,6 +51,354 @@ class UiTests : public QObject {
              c->onPoseReady(livePose(start + i * 200, angles[i]), token);
      }
    private slots:
@@ -1328,13 +1333,29 @@ index de0e1b5..e3da119 100644
 +        QTimer::singleShot(150, [&] {
 +            auto picker = qobject_cast<QFileDialog *>(QApplication::activeModalWidget());
 +            QVERIFY(picker);
++            page->camera->stop();
 +            QFileInfo chosen(dir.path());
 +            picker->setDirectory(chosen.absolutePath());
 +            picker->selectFile(chosen.fileName());
 +            picker->QDialog::accept();
 +        });
 +        QTest::mouseClick(record, Qt::LeftButton);
++        QVERIFY(page->findChild<QLabel *>("cameraRecordingResult")->text().contains("录像未开始"));
++        QVERIFY(record->text() != "处理中…");
++        page->camera->start("demo");
++        QTRY_VERIFY_WITH_TIMEOUT(record->isEnabled(), 10000);
++        QTimer::singleShot(150, [&] {
++            auto picker = qobject_cast<QFileDialog *>(QApplication::activeModalWidget());
++            QVERIFY(picker);
++            QFileInfo chosen(dir.path());
++            picker->setDirectory(chosen.absolutePath());
++            picker->selectFile(chosen.fileName());
++            picker->QDialog::accept();
++        });
++        QTest::mouseClick(record, Qt::LeftButton);
++        QVERIFY(!page->camera->startRecording(dir.path()));
 +        QTRY_COMPARE_WITH_TIMEOUT(result["state"].toString(), QString("started"), 10000);
++        QVERIFY(!page->camera->startRecording(dir.path()));
 +        const QString token = window.beginRealtimeInput("录像角度联测");
 +        connect(page->camera,&CameraStream::frameReady,&window,
 +                [&](const QImage &, const QString &, qint64 id,qint64 ms) {
@@ -1643,7 +1664,7 @@ index de0e1b5..e3da119 100644
      void realtimeStagesCountAndPageShareInput() {
          QTemporaryDir dir;
          MainWindow w(dir.path());
-@@ -474,7 +812,7 @@ class UiTests : public QObject {
+@@ -474,7 +828,7 @@ class UiTests : public QObject {
          MainWindow w(dir.path());
          auto source = w.findChild<QComboBox *>("poseSampleSource");
          QVERIFY(source);

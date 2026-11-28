@@ -39,9 +39,12 @@ CameraManager::~CameraManager() {
     }
 }
 bool CameraManager::startRecording(const QString &directory) {
-    if (!accepting || session.isEmpty() || directory.isEmpty()) return false;
+    if (!accepting || session.isEmpty() || directory.isEmpty() ||
+        recordingStartPending || !recordingId.isEmpty()) return false;
     QJsonObject cmd{{"command","startRecording"},{"directory",directory},{"requestId",QString::number(generation)}};
-    return process.write(QJsonDocument(cmd).toJson(QJsonDocument::Compact) + '\n') >= 0;
+    const auto line = QJsonDocument(cmd).toJson(QJsonDocument::Compact) + '\n';
+    recordingStartPending = process.write(line) == line.size();
+    return recordingStartPending;
 }
 bool CameraManager::submitAngles(const QString &sid, qint64 id, qint64 ms, const QJsonObject &angles) {
     if (recordingId.isEmpty() || sid != session || id < 0 || ms < 0 || angles.isEmpty()) return false;
@@ -200,6 +203,7 @@ void CameraManager::stop() {
     lastId = lastMs = -1;
     stale.stop();
     latest = {};
+    recordingStartPending = false;
     recordingId.clear();
     device.rttMs = device.battery = -1;
     device.resolution = {};
@@ -220,6 +224,7 @@ void CameraManager::failCapture(const QString &message) {
     closeSession();
     emit captureFailed();
     latest = {};
+    recordingStartPending = false;
     recordingId.clear();
     device.rttMs = device.battery = -1;
     device.fps = 0;
@@ -258,8 +263,11 @@ void CameraManager::readMessages() {
         if (type != "frame" && process.skip(bytes) != bytes) return invalid();
         if (type == "ready") { ready = true; request(); }
         else if (type == "recording") {
-            if (h["state"]=="started" && ours) recordingId=h["recordingId"].toString();
-            else if (h["state"]!="started") recordingId.clear();
+            if (ours) {
+                recordingStartPending = false;
+                if (h["state"]=="started") recordingId=h["recordingId"].toString();
+                else recordingId.clear();
+            }
             emit recordingChanged(h);
         }
         else if (type == "ack" && ours) accepting = h["command"] == "start";
