@@ -1286,7 +1286,7 @@ index d7f89eb..608c7de 100644
      core::PoseResult m_pose;
      bool m_reference = true;
 diff --git a/motiondetecter/tests/ui_tests.cpp b/motiondetecter/tests/ui_tests.cpp
-index de0e1b5..b7083d6 100644
+index de0e1b5..bfda86a 100644
 --- a/motiondetecter/tests/ui_tests.cpp
 +++ b/motiondetecter/tests/ui_tests.cpp
 @@ -2,6 +2,9 @@
@@ -1309,7 +1309,7 @@ index de0e1b5..b7083d6 100644
  #include <QSignalSpy>
  #include <QTemporaryDir>
  #include <QtTest>
-@@ -45,6 +51,354 @@ class UiTests : public QObject {
+@@ -45,6 +51,364 @@ class UiTests : public QObject {
              c->onPoseReady(livePose(start + i * 200, angles[i]), token);
      }
    private slots:
@@ -1469,7 +1469,15 @@ index de0e1b5..b7083d6 100644
 +        QCOMPARE(window.state()->config.resolution, QString("640 × 480"));
 +        window.navigate(PageId::Devices);
 +        auto camera = window.findChild<RealtimePage *>()->camera;
-+        QSignalSpy frames(camera, &CameraStream::frameReady);
++        int count = 0;
++        QString currentSession;
++        QSize size;
++        connect(camera,&CameraStream::frameReady,&window,
++                [&](const QImage &img,const QString &session,qint64,qint64) {
++            ++count;
++            size = img.size();
++            currentSession = session;
++        });
 +        auto metrics = window.findChild<QLabel *>("liveDeviceMetrics");
 +        if (phone) {
 +            connect(camera, &CameraStream::pairingReady, &window, [&](const QImage &image) {
@@ -1486,37 +1494,39 @@ index de0e1b5..b7083d6 100644
 +            });
 +        }
 +        window.findChild<QPushButton *>(phone ? "liveConnectPhone" : "liveConnectPC")->click();
-+        QTRY_VERIFY_WITH_TIMEOUT(frames.count() >= 30, phone ? 600000 : 30000);
++        QTRY_VERIFY_WITH_TIMEOUT(count >= 30, phone ? 600000 : 30000);
 +        QTRY_VERIFY_WITH_TIMEOUT(metrics->text().contains("fps"), 5000);
-+        qInfo().noquote() << "P2 received" << frames.count() << "frames;" << metrics->text();
-+        const QSize size = qvariant_cast<QImage>(frames.last().first()).size();
++        qInfo().noquote() << "P2 received" << count << "frames;" << metrics->text();
 +        QVERIFY(metrics->text().startsWith(QString("%1 × %2").arg(size.width()).arg(size.height())));
 +        if (phone && qEnvironmentVariableIsSet("POSELAB_PHONE_LIVE_SETTINGS")) {
-+            const auto sid = frames.last().at(1).toString();
++            const auto sid = currentSession;
++            QElapsedTimer elapsed;
++            elapsed.start();
 +            window.findChild<QComboBox *>("captureResolution")->setCurrentText("1280 × 720");
 +            fps->setCurrentIndex(fps->findData(30));
 +            QTRY_VERIFY_WITH_TIMEOUT(qMax(camera->deviceInfo().resolution.width(),
 +                                          camera->deviceInfo().resolution.height()) >= 1000,30000);
-+            frames.clear();
-+            QTRY_VERIFY_WITH_TIMEOUT(frames.count() >= 60,15000);
-+            QCOMPARE(frames.last().at(1).toString(),sid);
++            qInfo() << "Resize observed after ms:" << elapsed.elapsed() << size;
++            count = 0;
++            QTRY_VERIFY_WITH_TIMEOUT(count >= 60,15000);
++            QCOMPARE(currentSession,sid);
 +            qInfo().noquote() << "Phone after P6 change:" << metrics->text();
 +        } else if (!phone) {
 +            QCOMPARE(size,QSize(640,480));
-+            const auto session = frames.last().at(1).toString();
++            const auto session = currentSession;
 +            window.navigate(PageId::Settings);
 +            window.findChild<QComboBox *>("captureResolution")->setCurrentText("1280 × 720");
 +            QTRY_VERIFY_WITH_TIMEOUT(camera->deviceInfo().resolution == QSize(1280,720),8000);
-+            QCOMPARE(frames.last().at(1).toString(),session);
++            QCOMPARE(currentSession,session);
 +            qInfo() << "P6 live resize without restart:" << camera->deviceInfo().resolution;
 +            window.navigate(PageId::Devices);
 +        }
 +        window.findChild<QPushButton *>("liveDisconnectDevice")->click();
 +        QCOMPARE(window.findChild<QLabel *>("liveDeviceName")->text(), QString("未连接"));
 +        QCOMPARE(metrics->text(), QString("—"));
-+        int stopped = frames.count();
++        int stopped = count;
 +        QTest::qWait(250);
-+        QCOMPARE(frames.count(), stopped);
++        QCOMPARE(count, stopped);
 +    }
 +    void phoneInRealtimePage() {
 +        const QString host = qEnvironmentVariable("POSELAB_TEST_PHONE_HOST");
@@ -1664,7 +1674,7 @@ index de0e1b5..b7083d6 100644
      void realtimeStagesCountAndPageShareInput() {
          QTemporaryDir dir;
          MainWindow w(dir.path());
-@@ -474,7 +828,7 @@ class UiTests : public QObject {
+@@ -474,7 +838,7 @@ class UiTests : public QObject {
          MainWindow w(dir.path());
          auto source = w.findChild<QComboBox *>("poseSampleSource");
          QVERIFY(source);
