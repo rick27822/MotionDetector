@@ -89,6 +89,8 @@ class PhoneServer:
         self._pc = None
         self._session = None
         self._telemetry = None
+        self._decoded_count = 0
+        self.pipeline_sample = {}
         self._stream_settings = None
         self._tasks = set()
         self._pending = None
@@ -207,6 +209,11 @@ class PhoneServer:
         if sid != self._session:
             raise web.HTTPConflict(text="采集会话已切换")
         self._telemetry = (sid, time.monotonic(), rtt, battery)
+        sent, stamp = data.get("sentFrames"), data.get("statsMs")
+        self.pipeline_sample = dict(session=sid, receivedMs=round(time.monotonic()*1000),
+                                    decoded=self._decoded_count, produced=self.engine.stats()["session_frames"])
+        if (type(sent) is int and 0 <= sent < 2**53 and type(stamp) in (float,int) and 0 <= stamp < 2**53):
+            self.pipeline_sample = dict(self.pipeline_sample, sent=sent, senderMs=stamp)
         return web.json_response({"ok": True, "streamSettings": self._stream_settings})
 
     def set_stream_settings(self, capture, adaptive):
@@ -277,6 +284,7 @@ class PhoneServer:
         try:
             while self._pc is pc:
                 frame = await asyncio.wait_for(track.recv(), timeout=15)
+                self._decoded_count += 1
                 self._pending = frame  # Capacity one: new frames replace old ones.
                 self._frame_event.set()
         except (MediaStreamError, asyncio.TimeoutError):
@@ -309,6 +317,8 @@ class PhoneServer:
             return
         self._pc = None
         session, self._session = self._session, None
+        self._decoded_count = 0
+        self.pipeline_sample = {}
         self._telemetry = None
         self._pending = None
         tasks = [task for task in self._tasks if task is not asyncio.current_task()]

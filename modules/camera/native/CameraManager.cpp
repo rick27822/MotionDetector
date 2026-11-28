@@ -308,6 +308,7 @@ void CameraManager::readMessages() {
                             [](void *p){ delete static_cast<cv::Mat *>(p); },owner);
             device.resolution = QSize(w,height);
             device.fps = h["captureFps"].toDouble();
+            if (h.contains("pipelineSample")) setProperty("pipelineSample",h["pipelineSample"].toObject());
             device.rttMs = h["rttMs"].toDouble(-1);
             device.battery = h["battery"].toInt(-1);
             setState(ConnectionState::Streaming);

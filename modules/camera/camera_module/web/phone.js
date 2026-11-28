@@ -87,8 +87,12 @@ async function updateStats() {
   const peer = pc, sid = session;
   telemetryBusy = true;
   try {
-    const report = await peer.getStats(); let weak = false, rttMs = null;
+    const report = await peer.getStats(); let weak = false, rttMs = null, sentFrames = null, statsMs = null;
     report.forEach(s => {
+      if (s.type === "outbound-rtp" && (s.kind || s.mediaType) === "video" && Number.isSafeInteger(s.framesSent)) {
+        sentFrames = s.framesSent;
+        statsMs = s.timestamp;
+      }
       if (s.type !== "remote-inbound-rtp" || s.kind !== "video") return;
       if (Number.isFinite(s.roundTripTime)) rttMs = Math.round(1000*s.roundTripTime);
       if (s.fractionLost > .08 || s.roundTripTime > .3) weak = true;
@@ -96,7 +100,7 @@ async function updateStats() {
     if (batteryInfo === null) batteryInfo = navigator.getBattery ? navigator.getBattery().catch(() => null) : Promise.resolve(null);
     const battery = await batteryInfo;
     if (peer !== pc || sid !== session) return;
-    const response = await request("/telemetry", {session:sid, rttMs, battery:battery ? Math.round(100*battery.level) : null});
+    const response = await request("/telemetry", {session:sid, rttMs, sentFrames, statsMs, battery:battery ? Math.round(100*battery.level) : null});
     if (peer !== pc || sid !== session) return;
     const target = response.streamSettings;
     if (target && target.revision !== settingsRevision) {

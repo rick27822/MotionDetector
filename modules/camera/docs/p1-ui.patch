@@ -1286,7 +1286,7 @@ index d7f89eb..608c7de 100644
      core::PoseResult m_pose;
      bool m_reference = true;
 diff --git a/motiondetecter/tests/ui_tests.cpp b/motiondetecter/tests/ui_tests.cpp
-index de0e1b5..bfda86a 100644
+index de0e1b5..350f110 100644
 --- a/motiondetecter/tests/ui_tests.cpp
 +++ b/motiondetecter/tests/ui_tests.cpp
 @@ -2,6 +2,9 @@
@@ -1299,7 +1299,7 @@ index de0e1b5..bfda86a 100644
  #include "modules/ui/theme/Theme.h"
  #include "modules/ui/widgets/ChartView.h"
  #include "modules/ui/widgets/Controls.h"
-@@ -9,6 +12,9 @@
+@@ -9,12 +12,26 @@
  #include <QButtonGroup>
  #include <QComboBox>
  #include <QFile>
@@ -1309,7 +1309,24 @@ index de0e1b5..bfda86a 100644
  #include <QSignalSpy>
  #include <QTemporaryDir>
  #include <QtTest>
-@@ -45,6 +51,364 @@ class UiTests : public QObject {
+ #include <thread>
+ #include <limits>
+ using namespace ui;
++class PreviewPaintCounter : public QObject {
++public:
++    int latest = 0, painted = 0, lastPainted = 0;
++    bool eventFilter(QObject *, QEvent *event) override {
++        if (event->type() == QEvent::Paint && latest != lastPainted) {
++            ++painted;
++            lastPainted = latest;
++        }
++        return false;
++    }
++};
+ class UiTests : public QObject {
+     Q_OBJECT
+     static void snapshot(MainWindow &w, const QString &name) {
+@@ -45,6 +62,398 @@ class UiTests : public QObject {
              c->onPoseReady(livePose(start + i * 200, angles[i]), token);
      }
    private slots:
@@ -1469,12 +1486,20 @@ index de0e1b5..bfda86a 100644
 +        QCOMPARE(window.state()->config.resolution, QString("640 × 480"));
 +        window.navigate(PageId::Devices);
 +        auto camera = window.findChild<RealtimePage *>()->camera;
++        const bool profile = phone && qEnvironmentVariableIsSet("POSELAB_PHONE_PROFILE");
++        if (profile) {
++            window.findChild<QComboBox *>("captureResolution")->setCurrentText("1280 × 720");
++            fps->setCurrentIndex(fps->findData(30));
++        }
++        PreviewPaintCounter paints;
++        window.findChild<RealtimePage *>()->video->installEventFilter(&paints);
 +        int count = 0;
 +        QString currentSession;
 +        QSize size;
 +        connect(camera,&CameraStream::frameReady,&window,
 +                [&](const QImage &img,const QString &session,qint64,qint64) {
 +            ++count;
++            ++paints.latest;
 +            size = img.size();
 +            currentSession = session;
 +        });
@@ -1498,7 +1523,33 @@ index de0e1b5..bfda86a 100644
 +        QTRY_VERIFY_WITH_TIMEOUT(metrics->text().contains("fps"), 5000);
 +        qInfo().noquote() << "P2 received" << count << "frames;" << metrics->text();
 +        QVERIFY(metrics->text().startsWith(QString("%1 × %2").arg(size.width()).arg(size.height())));
-+        if (phone && qEnvironmentVariableIsSet("POSELAB_PHONE_LIVE_SETTINGS")) {
++        if (profile) {
++            QCOMPARE(qMax(size.height(),size.width()),1280);
++            window.navigate(PageId::Realtime);
++            QJsonObject recording;
++            connect(camera,&CameraStream::recordingChanged,&window,[&](const QJsonObject &r){recording=r;});
++            QVERIFY(camera->startRecording(dir.path()));
++            QTRY_COMPARE_WITH_TIMEOUT(recording["state"].toString(),QString("started"),5000);
++            const auto sid = currentSession;
++            QElapsedTimer timer;
++            timer.start();
++            for (int i=0; i<=20; ++i) {
++                const auto sample = camera->property("pipelineSample").toJsonObject();
++                qInfo().noquote() << "PROFILE" << timer.elapsed() << count << paints.painted
++                                  << QJsonDocument(sample).toJson(QJsonDocument::Compact).trimmed();
++                if (i<20) QTest::qWait(1000);
++            }
++            QCOMPARE(currentSession,sid);
++            camera->stopRecording();
++            QTRY_COMPARE_WITH_TIMEOUT(recording["state"].toString(),QString("finished"),15000);
++            QProcess verification;
++            const QDir module(qEnvironmentVariable("POSELAB_CAMERA_DIR"));
++            verification.start(qEnvironmentVariable("POSELAB_PYTHON",module.filePath(".venv/Scripts/python.exe")),
++                               {module.filePath("tests/check_recorded_frames.py"),recording["path"].toString()});
++            QVERIFY(verification.waitForFinished(30000));
++            QVERIFY2(verification.exitCode()==0,verification.readAllStandardError().constData());
++            qInfo().noquote() << verification.readAllStandardOutput().trimmed();
++        } else if (phone && qEnvironmentVariableIsSet("POSELAB_PHONE_LIVE_SETTINGS")) {
 +            const auto sid = currentSession;
 +            QElapsedTimer elapsed;
 +            elapsed.start();
@@ -1674,7 +1725,7 @@ index de0e1b5..bfda86a 100644
      void realtimeStagesCountAndPageShareInput() {
          QTemporaryDir dir;
          MainWindow w(dir.path());
-@@ -474,7 +838,7 @@ class UiTests : public QObject {
+@@ -474,7 +883,7 @@ class UiTests : public QObject {
          MainWindow w(dir.path());
          auto source = w.findChild<QComboBox *>("poseSampleSource");
          QVERIFY(source);

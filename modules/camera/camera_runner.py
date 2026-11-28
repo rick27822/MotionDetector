@@ -182,6 +182,7 @@ def main():
                      stride=width * 3, pixelFormat="BGR8", captureFps=engine.stats()["fps"],
                      sourceToOutput=packet.source_to_output.tolist(),
                      outputSize=[packet.image.shape[1], packet.image.shape[0]], configRevision=packet.config_revision,
+                     **({"pipelineSample":phone.pipeline_sample} if phone and os.getenv("POSELAB_PHONE_PROFILE") else {}),
                      **(phone.device_metrics(session) if phone else {}))
             elif result.status not in ("timeout", "session_changed"):
                 if result.status != last_status:
