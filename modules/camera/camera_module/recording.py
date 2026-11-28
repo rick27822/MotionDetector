@@ -1,10 +1,12 @@
 """Encode source frames independently of the latest-frame preview."""
 from fractions import Fraction
 import json
+import math
+import sqlite3
 from pathlib import Path
 from queue import Empty, Full, Queue
 from tempfile import TemporaryDirectory
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 from uuid import uuid4
 
 import av
@@ -28,6 +30,9 @@ class Recording:
         self.reason = ""
         self.error = ""
         self.result = None
+        self.angle_lock = Lock()
+        self.angles = sqlite3.connect("", check_same_thread=False)
+        self.angles.execute("CREATE TABLE poses (frame INTEGER, ms INTEGER, data TEXT, PRIMARY KEY(frame, ms))")
         self.worker = Thread(target=self._run, name="mp4-encoder")
         self.worker.start()
 
@@ -49,6 +54,38 @@ class Recording:
             # Publish the continuous prefix, with the exact reason for early completion.
             self.end("encoder_overload")
 
+    def submit_angles(self, recording_id, session, frame_id, ms, angles):
+        if (recording_id != self.id or session != self.session or type(frame_id) is not int
+                or type(ms) is not int or not 0 <= frame_id < 2**63 or not 0 <= ms < 2**63
+                or not isinstance(angles, dict) or not 0 < len(angles) <= 12):
+            return False
+        channels = {"leftKnee","rightKnee","leftHip","rightHip","trunk","leftElbow",
+                    "rightElbow","leftShoulder","rightShoulder","neck","leftAnkle","rightAnkle"}
+        if any(k not in channels or type(v) not in (int, float) or not 0 <= v <= 180
+               or not math.isfinite(v) for k, v in angles.items()):
+            return False
+        with self.angle_lock:
+            if self.closed.is_set():
+                return False
+            self.angles.execute("INSERT OR REPLACE INTO poses VALUES (?, ?, ?)",
+                                (frame_id, ms, json.dumps(angles, allow_nan=False)))
+        return True
+
+    def _join_angles(self, draft):
+        count = 0
+        index = draft / "frames.jsonl"
+        merged = draft / "frames.new"
+        with self.angle_lock, index.open(encoding="utf-8") as src, merged.open("w", encoding="utf-8") as out:
+            for line in src:
+                row = json.loads(line)
+                match = self.angles.execute("SELECT data FROM poses WHERE frame=? AND ms=?",
+                                            (row["sourceFrameId"], row["timestampMs"])).fetchone()
+                row["anglesDeg"] = json.loads(match[0]) if match else {}
+                count += int(match is not None)
+                out.write(json.dumps(row, allow_nan=False) + "\n")
+        merged.replace(index)
+        return count
+
     def finish(self, reason):
         self.end(reason)
         self.worker.join()
@@ -62,6 +99,7 @@ class Recording:
                 draft = Path(temp) / self.id
                 draft.mkdir()
                 summary = self._encode(draft)
+                summary["framesWithAngles"] = self._join_angles(draft)
                 (draft / "recording.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
                 destination = self.directory / self.id
                 draft.rename(destination)
@@ -70,6 +108,8 @@ class Recording:
             self.error = str(exc)
         finally:
             self.closed.set()
+            with self.angle_lock:
+                self.angles.close()
             self.done.set()
 
     def _encode(self, draft):

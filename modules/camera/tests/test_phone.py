@@ -71,6 +71,9 @@ class PhoneIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(packet,"No decoded WebRTC frame arrived")
         self.assertEqual(packet.source,"phone")
         self.assertEqual(packet.source_size,(160,120))
+        response = await self.post("/telemetry", {"session":answer["session"], "rttMs":24, "battery":73})
+        self.assertEqual(response.status,200)
+        self.assertEqual(self.server.device_metrics(packet.session_id), {"rttMs":24, "battery":73})
         response = await self.client.get(self.base+"/status",ssl=self.tls,
                          headers={"X-Pairing-Token":self.server.token})
         self.assertEqual(response.status,200)
@@ -87,6 +90,9 @@ class PhoneIntegrationTests(unittest.IsolatedAsyncioTestCase):
         new_packet = await asyncio.to_thread(self.engine.latest,None,8)
         self.assertIsNotNone(new_packet)
         self.assertNotEqual(new_packet.session_id,packet.session_id)
+        response = await self.post("/telemetry", {"session":answer["session"], "rttMs":24})
+        self.assertEqual(response.status,409)
+        self.assertEqual(self.server.device_metrics(new_packet.session_id), {})
         # A late disconnect from the previous session must not kill the new one.
         response = await self.post("/disconnect",{"session":answer["session"]})
         self.assertEqual(response.status,200)

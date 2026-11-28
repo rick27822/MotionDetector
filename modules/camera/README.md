@@ -6,7 +6,7 @@
 
 ## 本次完善（v1.1）
 
-Qt 主程序可通过 QProcess 启动 camera_runner.py 接收连续画面。仓库提供 Qt 预览示例及电脑、手机实测记录。[Qt 接入与验证](docs/qt-bridge.md)
+团队 Qt 主程序通过 CameraManager 使用 [ICameraSource.h](native/ICameraSource.h)。姿态模块可直接接收 BGR 格式的 cv::Mat、采集会话号、帧号和毫秒时间戳。录像用同一组标识关联角度，P4 可按帧读取。[构建步骤、调用示例与录像格式](docs/qt-bridge.md)
 
 接口完整说明见 `docs/INTERFACE.md`，公共类型见 `camera_module/interface.py`。
 新增明确取帧结果 `read_frame()`、处理前原图 `source_bgr`、配置版本 `config_revision`、当前会话帧数、可配置补边值。完善参数校验、停止/断开唤醒、旧会话隔离和手机服务重启；单帧导出现在包含原图、处理图、NumPy数组和JSON。界面增加原图切换，并修正Windows缩放下的布局。

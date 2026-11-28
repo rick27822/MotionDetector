@@ -11,6 +11,7 @@ import time
 from threading import Thread
 
 from camera_module import CameraEngine, CaptureConfig, PreprocessConfig
+from camera_module.core import is_rtsp_source
 
 
 def send(kind, payload=b"", **fields):
@@ -49,9 +50,17 @@ def main():
     session = ""
     last_ms = -1
     recording_request = None
+    pending_settings = None
+
+    def apply_settings(settings):
+        target, adaptive = settings
+        if phone:
+            phone.set_stream_settings(target, adaptive)
+        else:
+            engine.set_capture_target(target)
 
     def finish_recording(reason):
-        nonlocal recording_request
+        nonlocal recording_request, pending_settings
         try:
             info = engine.stop_recording(reason)
             if info:
@@ -59,6 +68,9 @@ def main():
         except RuntimeError as exc:
             send("recording", state="failed", requestId=recording_request, message=str(exc))
         recording_request = None
+        if pending_settings is not None:
+            apply_settings(pending_settings)
+            pending_settings = None
 
     def stop():
         nonlocal phone, active, session, last_id, last_ms, last_status
@@ -96,7 +108,7 @@ def main():
                             candidate = PhoneServer(engine, Path(__file__).parent / "runtime",
                                                     host, command.get("port", 8443))
                         elif not (type(source) is int and source >= 0 or
-                                  isinstance(source, str) and (source == "demo" or Path(source).is_file())):
+                                  isinstance(source, str) and (source == "demo" or is_rtsp_source(source) or Path(source).is_file())):
                             raise ValueError("输入源应为设备编号、视频路径、demo 或 phone")
                         stop()
                         if source == "phone":
@@ -112,6 +124,16 @@ def main():
                         else:
                             engine.start(source, capture)
                         active = True
+                    elif name == "setCapture":
+                        target = CaptureConfig(**command["capture"])
+                        target.validate()
+                        adaptive = command.get("adaptiveQuality", True)
+                        if not isinstance(adaptive, bool):
+                            raise ValueError("adaptiveQuality 应为布尔值")
+                        if recording_request is not None:
+                            pending_settings = (target, adaptive)
+                        else:
+                            apply_settings((target, adaptive))
                     elif name == "configure":
                         engine.configure(PreprocessConfig(**command["processing"]))
                     elif name == "stop":
@@ -124,6 +146,11 @@ def main():
                         else:
                             recording_request = request
                             send("recording", state="started", recordingId=identity, requestId=request)
+                        continue
+                    elif name == "angles":
+                        engine.submit_recording_angles(command.get("recordingId"), command.get("sessionId"),
+                                                       command.get("sourceFrameId"), command.get("timestampMs"),
+                                                       command.get("anglesDeg"))
                         continue
                     elif name == "stopRecording":
                         finish_recording("stopped")
@@ -154,7 +181,8 @@ def main():
                      sourceFrameId=last_id, timestampMs=stamp, width=width, height=height,
                      stride=width * 3, pixelFormat="BGR8", captureFps=engine.stats()["fps"],
                      sourceToOutput=packet.source_to_output.tolist(),
-                     outputSize=[packet.image.shape[1], packet.image.shape[0]], configRevision=packet.config_revision)
+                     outputSize=[packet.image.shape[1], packet.image.shape[0]], configRevision=packet.config_revision,
+                     **(phone.device_metrics(session) if phone else {}))
             elif result.status not in ("timeout", "session_changed"):
                 if result.status != last_status:
                     message = "等待手机扫码连接" if phone and result.status == "not_running" else result.message

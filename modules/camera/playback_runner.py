@@ -22,7 +22,10 @@ class IndexedRecording:
             raise ValueError("请选择 4.2 导出的 video.mp4 或 recording.json")
         self.session = meta["sessionId"]
         self.pts, self.ids, self.stamps = (array("q") for _ in range(3))
-        with (directory / "frames.jsonl").open(encoding="utf-8") as index:
+        self.index_path = directory / "frames.jsonl"
+        self.angle_offsets = array("q")
+        offset = 0
+        with self.index_path.open("rb") as index:
             for line in index:
                 row = json.loads(line)
                 pts, identity, stamp = row["pts"], row["sourceFrameId"], row["timestampMs"]
@@ -34,6 +37,8 @@ class IndexedRecording:
                 self.pts.append(pts)
                 self.ids.append(identity)
                 self.stamps.append(stamp)
+                self.angle_offsets.append(offset if row.get("anglesDeg") else -1)
+                offset += len(line)
         if not self.pts or len(self.pts) != meta["frames"]:
             raise ValueError("录像与帧索引的数量不符")
         self.container = av.open(str(directory / "video.mp4"))
@@ -69,7 +74,12 @@ class IndexedRecording:
             else:
                 raise ValueError("视频提前结束")
         next_ms = (self.pts[pos+1]+89)//90 if pos+1 < len(self.pts) else self.duration_ms
-        return self.image, dict(sourceFrameId=self.ids[pos], timestampMs=self.stamps[pos],
+        angles = {}
+        if self.angle_offsets[pos] >= 0:
+            with self.index_path.open("rb") as index:
+                index.seek(self.angle_offsets[pos])
+                angles = json.loads(index.readline())["anglesDeg"]
+        return self.image, dict(sourceFrameId=self.ids[pos], timestampMs=self.stamps[pos], anglesDeg=angles,
                                 pts=self.pts[pos], nextMs=next_ms)
 
 

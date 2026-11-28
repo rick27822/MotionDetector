@@ -4,7 +4,7 @@
 
 ## 先看应该交哪个文件
 
-- Qt/C++ 主程序通过 QProcess 启动 Python 采集程序。在 `CameraStream::frameReady(image, sessionId, sourceFrameId, timestampMs)` 接收原图。时间戳是从本次采集会话开始计算的单调毫秒。姿态模块应保留会话、帧号和时间戳。[Qt 接入步骤](qt-bridge.md)
+- Qt/C++ 入口为 [ICameraSource.h](../native/ICameraSource.h)，实现为 CameraManager。通过 frameReady 接收 BGR cv::Mat，通过 sourceFrameReady 同时取得会话和源帧号。Qt 界面沿用共享像素的 QImage 预览。时间戳是从本次采集会话开始计算的单调毫秒。姿态模块应保留会话、帧号和时间戳。[Qt 接入步骤](qt-bridge.md)
 - Python 调用方从 `camera_module` 导入 `CameraEngine`。配置类型、帧结构和取帧结果见 [Python 接口定义](../camera_module/interface.py)。
 - 需要讨论原生 C++ 移植时，可参考 [camera_module.h](camera_module.h)。当前可运行的采集实现由 Python 提供。
 

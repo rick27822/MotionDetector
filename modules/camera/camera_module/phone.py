@@ -9,6 +9,7 @@ import secrets
 import socket
 import ssl
 import threading
+import time
 
 from aiohttp import web
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration
@@ -87,6 +88,8 @@ class PhoneServer:
         self._runner = None
         self._pc = None
         self._session = None
+        self._telemetry = None
+        self._stream_settings = None
         self._tasks = set()
         self._pending = None
         self._frame_event = None
@@ -159,6 +162,7 @@ class PhoneServer:
         app.router.add_get("/phone.css", self._style)
         app.router.add_post("/offer", self._offer)
         app.router.add_post("/disconnect", self._disconnect)
+        app.router.add_post("/telemetry", self._device_metrics)
         app.router.add_get("/status", self._status)
         self._runner = web.AppRunner(app, access_log=None)
         await self._runner.setup()
@@ -188,6 +192,33 @@ class PhoneServer:
         if packet is not None:
             data["packet"] = packet.metadata()
         return web.json_response(data)
+
+    async def _device_metrics(self, request):
+        self._authorize(request)
+        try:
+            data = await request.json()
+            sid, rtt, battery = data["session"], data.get("rttMs"), data.get("battery")
+            if (not isinstance(sid, str) or not sid
+                    or (rtt is not None and (type(rtt) not in (int, float) or not 0 <= rtt <= 60000))
+                    or (battery is not None and (type(battery) is not int or not 0 <= battery <= 100))):
+                raise ValueError()
+        except (KeyError, ValueError, TypeError):
+            raise web.HTTPBadRequest(text="设备统计格式无效")
+        if sid != self._session:
+            raise web.HTTPConflict(text="采集会话已切换")
+        self._telemetry = (sid, time.monotonic(), rtt, battery)
+        return web.json_response({"ok": True, "streamSettings": self._stream_settings})
+
+    def set_stream_settings(self, capture, adaptive):
+        revision = 1 if self._stream_settings is None else self._stream_settings["revision"]+1
+        self._stream_settings = dict(width=capture.width, height=capture.height, fps=capture.fps,
+                                     adaptive=adaptive, revision=revision)
+
+    def device_metrics(self, session):
+        metrics = self._telemetry
+        if not metrics or metrics[0] != session or time.monotonic() - metrics[1] > 10:
+            return {}
+        return {"rttMs": metrics[2], "battery": metrics[3]}
 
     async def _offer(self, request):
         self._authorize(request)
@@ -278,6 +309,7 @@ class PhoneServer:
             return
         self._pc = None
         session, self._session = self._session, None
+        self._telemetry = None
         self._pending = None
         tasks = [task for task in self._tasks if task is not asyncio.current_task()]
         for task in tasks:

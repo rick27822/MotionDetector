@@ -1,8 +1,8 @@
 diff --git a/motiondetecter/CMakeLists.txt b/motiondetecter/CMakeLists.txt
-index dc9b419..e784c13 100644
+index dc9b419..6a7b7ab 100644
 --- a/motiondetecter/CMakeLists.txt
 +++ b/motiondetecter/CMakeLists.txt
-@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
+@@ -2,11 +2,13 @@ cmake_minimum_required(VERSION 3.21)
  project(motiondetecter VERSION 0.1.0 LANGUAGES CXX)
  set(CMAKE_CXX_STANDARD 17)
  set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,7 +11,13 @@ index dc9b419..e784c13 100644
  qt_standard_project_setup()
  # Layouts are built in C++ to share the same widgets and support deterministic UI tests.
  set(CMAKE_AUTOUIC OFF)
-@@ -16,6 +16,8 @@ add_library(motion_ui STATIC
+ set(CMAKE_AUTORCC ON)
++set(POSELAB_CAMERA_NATIVE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../modules/camera/native" CACHE PATH "4.2 camera native sources")
++add_subdirectory("${POSELAB_CAMERA_NATIVE_DIR}" camera_native)
+ add_library(motion_ui STATIC
+     core/types.cpp core/types.h
+     modules/pose/SkeletonPainter.cpp modules/pose/SkeletonPainter.h
+@@ -16,6 +18,8 @@ add_library(motion_ui STATIC
      modules/ui/widgets/VideoView.cpp modules/ui/widgets/VideoView.h
      modules/ui/widgets/ChartView.cpp modules/ui/widgets/ChartView.h
      modules/ui/adapters/PoseSampleReader.cpp modules/ui/adapters/PoseSampleReader.h
@@ -20,24 +26,25 @@ index dc9b419..e784c13 100644
      modules/ui/adapters/AnalysisM0Adapter.cpp modules/ui/adapters/AnalysisM0Adapter.h
      modules/ui/controllers/RealtimeController.cpp modules/ui/controllers/RealtimeController.h
      modules/ui/adapters/PoseReplay.cpp modules/ui/adapters/PoseReplay.h
-@@ -30,7 +32,7 @@ add_library(motion_ui STATIC
+@@ -30,7 +34,7 @@ add_library(motion_ui STATIC
      mainwindow.cpp mainwindow.h
      modules/ui/resources/ui.qrc)
  target_include_directories(motion_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 -target_link_libraries(motion_ui PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets)
-+target_link_libraries(motion_ui PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network)
++target_link_libraries(motion_ui PUBLIC PoseLabCamera Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network)
  qt_add_executable(motiondetecter MACOSX_BUNDLE WIN32 main.cpp)
  target_link_libraries(motiondetecter PRIVATE motion_ui)
  set_target_properties(motiondetecter PROPERTIES MACOSX_BUNDLE_BUNDLE_NAME PoseLab
 diff --git a/motiondetecter/app/AppState.h b/motiondetecter/app/AppState.h
-index 9cad141..99d2ac2 100644
+index 9cad141..b424451 100644
 --- a/motiondetecter/app/AppState.h
 +++ b/motiondetecter/app/AppState.h
-@@ -7,6 +7,7 @@ enum class PageId { Realtime, Devices, DetectionConfig, Playback, Analysis, Sett
+@@ -7,6 +7,8 @@ enum class PageId { Realtime, Devices, DetectionConfig, Playback, Analysis, Sett
  struct UiConfig {
      float confidence = .50f, smoothing = .60f;
      bool interpolate = true, nose = false, mirror = false;
 +    bool adaptiveQuality = true;
++    QString networkProtocol = "WebRTC";
      QString resolution = "1920 × 1080";
      int fps = 30, threads = 4;
      QString storagePath;
@@ -110,224 +117,36 @@ index 07703c5..8a5a46c 100644
  }
 diff --git a/motiondetecter/modules/ui/adapters/CameraStream.cpp b/motiondetecter/modules/ui/adapters/CameraStream.cpp
 new file mode 100644
-index 0000000..18a3aa9
+index 0000000..0dd2665
 --- /dev/null
 +++ b/motiondetecter/modules/ui/adapters/CameraStream.cpp
-@@ -0,0 +1,160 @@
+@@ -0,0 +1 @@
 +#include "CameraStream.h"
-+#include <QDir>
-+#include <QFileInfo>
-+#include <QJsonDocument>
-+#include <QJsonObject>
-+#include <QtEndian>
-+
-+namespace ui {
-+CameraStream::CameraStream(QObject *parent) : QObject(parent) {
-+    process.setProcessChannelMode(QProcess::ForwardedErrorChannel);
-+    stale.setSingleShot(true);
-+    connect(&stale, &QTimer::timeout, this, [this] { emit statusChanged("等待新的相机画面"); });
-+    connect(&process, &QProcess::readyReadStandardOutput, this, &CameraStream::readMessages);
-+    connect(&process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
-+        if (error == QProcess::FailedToStart)
-+            failCapture("无法启动采集程序，请检查 Python 路径：" + process.errorString());
-+    });
-+    connect(&process, &QProcess::finished, this, [this] {
-+        stale.stop();
-+        ready = accepting = false;
-+        emit recordingChanged({{"state","exited"}});
-+        failCapture("采集进程已退出，请重新开始");
-+    });
-+}
-+CameraStream::~CameraStream() {
-+    disconnect(&process, nullptr, this, nullptr);
-+    process.closeWriteChannel();
-+    if (process.state() != QProcess::NotRunning && !process.waitForFinished(12000)) {
-+        process.kill();
-+        process.waitForFinished(1500);
-+    }
-+}
-+void CameraStream::startRecording(const QString &directory) {
-+    QJsonObject cmd{{"command","startRecording"},{"directory",directory},{"requestId",QString::number(generation)}};
-+    process.write(QJsonDocument(cmd).toJson(QJsonDocument::Compact) + '\n');
-+}
-+void CameraStream::stopRecording() {
-+    QJsonObject cmd{{"command","stopRecording"},{"requestId",QString::number(generation)}};
-+    process.write(QJsonDocument(cmd).toJson(QJsonDocument::Compact) + '\n');
-+}
-+void CameraStream::request() {
-+    if (!ready) return;
-+    QJsonObject cmd{{"requestId", QString::number(generation)},
-+                    {"command", selected.isNull() ? "stop" : "start"}};
-+    if (!selected.isNull()) {
-+        cmd["source"] = selected;
-+        cmd["capture"] = capture;
-+        cmd["adaptiveQuality"] = adaptiveQuality;
-+        if (selected == "phone") cmd["host"] = host;
-+    }
-+    process.write(QJsonDocument(cmd).toJson(QJsonDocument::Compact) + '\n');
-+}
-+void CameraStream::setCaptureSettings(QSize size, int fps, bool adaptive) {
-+    capture = {{"width",size.width()},{"height",size.height()},{"fps",fps}};
-+    adaptiveQuality = adaptive;
-+}
-+void CameraStream::start(const QJsonValue &source, const QString &phoneHost) {
-+    stop();
-+    selected = source;
-+    host = phoneHost;
-+    ++generation;
-+    emit statusChanged("正在打开相机…");
-+    if (process.state() != QProcess::NotRunning) { request(); return; }
-+    ready = false;
-+    buffer.clear();
-+    QDir folder(qEnvironmentVariable("POSELAB_CAMERA_DIR", "modules/camera"));
-+    const QString script = folder.absoluteFilePath("camera_runner.py");
-+#ifdef Q_OS_WIN
-+    const QString venv = ".venv/Scripts/python.exe";
-+#else
-+    const QString venv = ".venv/bin/python";
-+#endif
-+    const QString python = qEnvironmentVariable("POSELAB_PYTHON", folder.absoluteFilePath(venv));
-+    if (!QFileInfo::exists(script)) {
-+        failCapture("找不到 camera_runner.py，请设置 POSELAB_CAMERA_DIR");
-+        return;
-+    }
-+    process.start(python, {script});
-+}
-+void CameraStream::stop() {
-+    ++generation;
-+    selected = QJsonValue(QJsonValue::Null);
-+    accepting = false;
-+    closeSession();
-+    lastId = lastMs = -1;
-+    stale.stop();
-+    request();
-+}
-+void CameraStream::closeSession() {
-+    if (session.isEmpty()) return;
-+    session.clear();
-+    emit sessionClosed();
-+}
-+void CameraStream::failCapture(const QString &message) {
-+    if (selected.isNull()) return;
-+    selected = QJsonValue(QJsonValue::Null);
-+    accepting = false;
-+    stale.stop();
-+    closeSession();
-+    emit captureFailed();
-+    emit statusChanged(message);
-+}
-+void CameraStream::readMessages() {
-+    buffer += process.readAllStandardOutput();
-+    qsizetype offset = 0;
-+    auto invalid = [this] {
-+        failCapture("相机数据格式错误");
-+        process.kill();
-+    };
-+    while (buffer.size() - offset >= 4) {
-+        const char *start = buffer.constData() + offset;
-+        const auto len = qFromBigEndian<quint32>(start);
-+        if (!len || len > 65536) return invalid();
-+        if (buffer.size() - offset < 4 + len) break;
-+        const auto h = QJsonDocument::fromJson(QByteArray::fromRawData(start + 4, len)).object();
-+        const auto bytes = h["payloadLength"].toInteger(-1);
-+        if (h["version"].toInt() != 1 || bytes < 0 || bytes > 32 * 1024 * 1024) return invalid();
-+        const auto total = 4 + len + bytes;
-+        if (buffer.size() - offset < total) break;
-+        const auto type = h["type"].toString();
-+        const auto pixels = reinterpret_cast<const uchar *>(start + 4 + len);
-+        const bool ours = h["requestId"].toString() == QString::number(generation);
-+        if (type == "ready") { ready = true; request(); }
-+        else if (type == "recording") emit recordingChanged(h);
-+        else if (type == "ack" && ours) accepting = h["command"] == "start";
-+        else if (type == "pairing" && ours) {
-+            const auto qr = QImage::fromData(pixels, bytes, "PNG");
-+            if (qr.isNull()) return invalid();
-+            emit pairingReady(qr);
-+        } else if ((type == "error" && ours) || (type == "status" && accepting)) {
-+            stale.stop();
-+            const auto state = h["state"].toString();
-+            if (type == "error" || state == "error" || state == "end_of_stream") {
-+                failCapture(h["message"].toString());
-+            } else {
-+                if (state == "disconnected") closeSession();
-+                emit statusChanged(h["message"].toString());
-+            }
-+        } else if (type == "frame" && accepting) {
-+            const int w = h["width"].toInt(), height = h["height"].toInt();
-+            const qint64 stride = h["stride"].toInteger(-1);
-+            if (w <= 0 || height <= 0 || stride != qint64(w)*3 || stride > bytes ||
-+                stride*height != bytes || h["pixelFormat"] != "BGR8") return invalid();
-+            const QString sid = h["sessionId"].toString();
-+            const auto id = h["sourceFrameId"].toInteger(-1), ms = h["timestampMs"].toInteger(-1);
-+            if (sid.isEmpty() || id < 0 || ms < 0 ||
-+                (session == sid && (id <= lastId || ms <= lastMs))) return invalid();
-+            if (session != sid) closeSession();
-+            session = sid;
-+            lastId = id;
-+            lastMs = ms;
-+            stale.start(550);
-+            emit frameReady(QImage(pixels, w, height, stride, QImage::Format_BGR888).copy(), sid, id, ms);
-+            if (h.contains("captureFps")) emit captureMeasured(QSize(w,height), h["captureFps"].toDouble(), sid);
-+        }
-+        offset += total;
-+    }
-+    buffer.remove(0, offset);
-+}
-+}
 diff --git a/motiondetecter/modules/ui/adapters/CameraStream.h b/motiondetecter/modules/ui/adapters/CameraStream.h
 new file mode 100644
-index 0000000..79f09b1
+index 0000000..1d619c4
 --- /dev/null
 +++ b/motiondetecter/modules/ui/adapters/CameraStream.h
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,13 @@
 +#pragma once
-+#include <QImage>
-+#include <QJsonValue>
-+#include <QJsonObject>
-+#include <QProcess>
-+#include <QTimer>
-+
++#include "CameraManager.h"
 +namespace ui {
-+class CameraStream : public QObject {
++class CameraStream : public camera::CameraManager {
 +    Q_OBJECT
-+  public:
-+    explicit CameraStream(QObject *parent = nullptr);
-+    ~CameraStream() override;
-+    void start(const QJsonValue &source, const QString &phoneHost = {});
-+    void stop();
-+    void setCaptureSettings(QSize size, int fps, bool adaptive);
-+    void startRecording(const QString &directory);
-+    void stopRecording();
-+  signals:
++public:
++    explicit CameraStream(QObject *parent = nullptr) : CameraManager(parent) {
++        connect(this, &CameraManager::previewReady, this, &CameraStream::frameReady);
++    }
++signals:
 +    void frameReady(const QImage &image, const QString &sessionId, qint64 sourceFrameId, qint64 timestampMs);
-+    void statusChanged(const QString &message);
-+    void captureFailed();
-+    void sessionClosed();
-+    void pairingReady(const QImage &qr);
-+    void captureMeasured(QSize size, double fps, const QString &session);
-+    void recordingChanged(const QJsonObject &result);
-+  private:
-+    QProcess process;
-+    QTimer stale;
-+    QByteArray buffer;
-+    QJsonValue selected;
-+    QJsonObject capture;
-+    bool adaptiveQuality = true;
-+    QString host, session;
-+    qint64 generation = 0, lastId = -1, lastMs = -1;
-+    bool ready = false, accepting = false;
-+    void request();
-+    void readMessages();
-+    void closeSession();
-+    void failCapture(const QString &message);
 +};
 +}
 diff --git a/motiondetecter/modules/ui/adapters/RecordingPlayer.cpp b/motiondetecter/modules/ui/adapters/RecordingPlayer.cpp
 new file mode 100644
-index 0000000..c31619e
+index 0000000..2314f60
 --- /dev/null
 +++ b/motiondetecter/modules/ui/adapters/RecordingPlayer.cpp
-@@ -0,0 +1,126 @@
+@@ -0,0 +1,127 @@
 +#include "RecordingPlayer.h"
 +#include <QDir>
 +#include <QJsonDocument>
@@ -440,6 +259,7 @@ index 0000000..c31619e
 +                auto data = reinterpret_cast<const uchar *>(buffer.constData()+4+n);
 +                auto img = QImage(data,w,ht,w*3,QImage::Format_BGR888).copy();
 +                displayed = h["ms"].toInt();
++                angles = h["anglesDeg"].toObject();
 +                emit frameReady(img, displayed, h["sourceFrameId"].toInteger(), h["timestampMs"].toInteger());
 +                if (running && displayed >= length) {
 +                    running = false;
@@ -456,13 +276,14 @@ index 0000000..c31619e
 +}
 diff --git a/motiondetecter/modules/ui/adapters/RecordingPlayer.h b/motiondetecter/modules/ui/adapters/RecordingPlayer.h
 new file mode 100644
-index 0000000..a98c7be
+index 0000000..13434a2
 --- /dev/null
 +++ b/motiondetecter/modules/ui/adapters/RecordingPlayer.h
-@@ -0,0 +1,39 @@
+@@ -0,0 +1,42 @@
 +#pragma once
 +#include <QElapsedTimer>
 +#include <QImage>
++#include <QJsonObject>
 +#include <QProcess>
 +#include <QTimer>
 +
@@ -479,6 +300,7 @@ index 0000000..a98c7be
 +    void setRate(double rate);
 +    int duration() const { return length; }
 +    bool playing() const { return running; }
++    QJsonObject anglesDeg() const { return angles; }
 +  signals:
 +    void opened(int ms);
 +    void frameReady(const QImage &, int ms, qint64 sourceFrameId, qint64 captureMs);
@@ -486,6 +308,7 @@ index 0000000..a98c7be
 +    void failed(const QString &message);
 +  private:
 +    QProcess *worker = nullptr;
++    QJsonObject angles;
 +    QByteArray buffer;
 +    QTimer timer;
 +    QElapsedTimer clock;
@@ -500,39 +323,69 @@ index 0000000..a98c7be
 +};
 +}
 diff --git a/motiondetecter/modules/ui/controllers/Controllers.cpp b/motiondetecter/modules/ui/controllers/Controllers.cpp
-index 1389fd6..76d8fa1 100644
+index 1389fd6..deb197e 100644
 --- a/motiondetecter/modules/ui/controllers/Controllers.cpp
 +++ b/motiondetecter/modules/ui/controllers/Controllers.cpp
-@@ -18,6 +18,7 @@ QJsonObject UiConfig::toJson() const {
+@@ -18,6 +18,8 @@ QJsonObject UiConfig::toJson() const {
              {"interpolate", interpolate},
              {"nose", nose},
              {"mirror", mirror},
 +            {"adaptiveQuality", adaptiveQuality},
++            {"networkProtocol", networkProtocol},
              {"resolution", resolution},
              {"fps", fps},
              {"threads", threads},
-@@ -35,6 +36,7 @@ bool UiConfig::fromJson(const QJsonObject &o, UiConfig &out, QString &error) {
+@@ -35,6 +37,12 @@ bool UiConfig::fromJson(const QJsonObject &o, UiConfig &out, QString &error) {
      c.interpolate = o.value("interpolate").toBool(true);
      c.nose = o.value("nose").toBool(false);
      c.mirror = o.value("mirror").toBool(false);
 +    c.adaptiveQuality = o.value("adaptiveQuality").toBool(true);
++    c.networkProtocol = o.value("networkProtocol").toString("WebRTC");
++    if (c.networkProtocol != "WebRTC" && c.networkProtocol != "RTSP") {
++        error = "网络摄像头协议无效";
++        return false;
++    }
      c.resolution = o.value("resolution").toString();
      c.fps = o.value("fps").toInt();
      c.threads = o.value("threads").toInt();
-@@ -123,7 +125,7 @@ bool SettingsController::apply(const UiConfig &config) {
+@@ -123,7 +131,7 @@ bool SettingsController::apply(const UiConfig &config) {
      m_state->config = validated;
      m_error.clear();
      emit m_state->configChanged();
 -    emit feedback("界面样例配置已保存，重启后保留；尚未下发真实设备或模型", true);
-+    emit feedback("配置已保存。采集参数下次启动相机时生效。", true);
++    emit feedback("配置已保存。采集实测值可在设备连接页查看。", true);
      return true;
  }
  DeviceController::DeviceController(AppState *s, QObject *p) : QObject(p), m_state(s) {}
+diff --git a/motiondetecter/modules/ui/controllers/RealtimeController.cpp b/motiondetecter/modules/ui/controllers/RealtimeController.cpp
+index 24e42fa..15f0b6e 100644
+--- a/motiondetecter/modules/ui/controllers/RealtimeController.cpp
++++ b/motiondetecter/modules/ui/controllers/RealtimeController.cpp
+@@ -174,6 +174,7 @@ void RealtimeController::accept(const core::PoseResult &pose, const QString &tok
+         r.message = "姿态帧等待过久，请检查输入负载";
+         clearPose();
+     }
++    if (m_pose.detected && !stale) emit poseAccepted(m_pose);
+     publish(r, true);
+     if (r.repCompleted)
+         emit repCompleted(token, r.completedReps);
+diff --git a/motiondetecter/modules/ui/controllers/RealtimeController.h b/motiondetecter/modules/ui/controllers/RealtimeController.h
+index 91b145b..5d24d76 100644
+--- a/motiondetecter/modules/ui/controllers/RealtimeController.h
++++ b/motiondetecter/modules/ui/controllers/RealtimeController.h
+@@ -30,6 +30,7 @@ class RealtimeController : public QObject {
+     void poll();
+ 
+   signals:
++    void poseAccepted(const core::PoseResult &pose);
+     void changed();
+     void sessionStarted(const QString &sessionToken);
+     void sessionEnded(const QString &sessionToken, quint64 completedReps);
 diff --git a/motiondetecter/modules/ui/pages/DevicePage.cpp b/motiondetecter/modules/ui/pages/DevicePage.cpp
-index 12f220d..0d1d2b1 100644
+index 12f220d..f0f96ae 100644
 --- a/motiondetecter/modules/ui/pages/DevicePage.cpp
 +++ b/motiondetecter/modules/ui/pages/DevicePage.cpp
-@@ -2,11 +2,77 @@
+@@ -2,11 +2,104 @@
  #include "modules/ui/theme/Theme.h"
  #include "modules/ui/widgets/Controls.h"
  #include <QGridLayout>
@@ -571,7 +424,28 @@ index 12f220d..0d1d2b1 100644
 +    details->body->addWidget(status);
 +    details->body->addWidget(row("实际画面 / 采集帧率",metrics));
 +    auto pcButton = button("连接电脑摄像头", "liveConnectPC");
++    auto cameras = new QComboBox;
++    auto refreshDevices = button("刷新摄像头列表", "refreshCaptureDevices");
++    const auto refreshCameraList = [=] {
++        const auto selected = cameras->currentData();
++        cameras->clear();
++        for (const auto &info : p1->camera->discoverDevices()) {
++            if (info.protocol == "USB")
++                cameras->addItem(info.name, info.id.section(':',1).toInt());
++        }
++        const int previous = cameras->findData(selected);
++        if (previous >= 0) cameras->setCurrentIndex(previous);
++        cameras->setPlaceholderText("未发现本机摄像头");
++        pcButton->setEnabled(cameras->count() && (!s->realtimeInput || p1->cameraSelected()));
++    };
++    connect(refreshDevices,&QPushButton::clicked,this,refreshCameraList);
++    refreshCameraList();
++    details->body->addWidget(cameras);
++    details->body->addWidget(refreshDevices);
 +    auto phoneButton = button("连接手机", "liveConnectPhone");
++    auto updateNetworkLabel = [=] { phoneButton->setText(s->config.networkProtocol=="RTSP" ? "连接 RTSP 摄像头" : "连接手机"); };
++    updateNetworkLabel();
++    connect(s,&AppState::configChanged,this,updateNetworkLabel);
 +    auto end = button("断开连接", "liveDisconnectDevice");
 +    end->setEnabled(false);
 +    details->body->addWidget(pcButton);
@@ -579,7 +453,7 @@ index 12f220d..0d1d2b1 100644
 +    details->body->addWidget(end);
 +    details->body->addStretch();
 +    live->addWidget(details, 1);
-+    connect(pcButton, &QPushButton::clicked, p1, [p1] { p1->connectCamera(false); });
++    connect(pcButton, &QPushButton::clicked, p1, [=] { p1->connectCamera(false,cameras->currentData().toInt()); });
 +    connect(phoneButton, &QPushButton::clicked, p1, [p1] { p1->connectCamera(true); });
 +    connect(end, &QPushButton::clicked, p1, &RealtimePage::disconnectCamera);
 +    connect(p1, &RealtimePage::captureSourceChanged, this, [=](const QString &name) {
@@ -600,10 +474,16 @@ index 12f220d..0d1d2b1 100644
 +    connect(p1->camera, &CameraStream::captureMeasured, this, [=](QSize size, double fps, const QString &) {
 +        status->setText("已连接");
 +        QString rate = fps > 0 ? QString::number(fps,'f',1) + " fps" : QString("测量中");
-+        metrics->setText(QString("%1 × %2 / %3").arg(size.width()).arg(size.height()).arg(rate));
++        QString values = QString("%1 × %2 / %3").arg(size.width()).arg(size.height()).arg(rate);
++        const auto info = p1->camera->deviceInfo();
++        if (info.protocol == "WebRTC") {
++            values += info.rttMs >= 0 ? QString(" · 网络往返 %1 ms").arg(qRound(info.rttMs)) : " · 往返时间未知";
++            values += info.battery >= 0 ? QString(" · 电量 %1%").arg(info.battery) : " · 电量未知";
++        }
++        metrics->setText(values);
 +    });
 +    connect(s, &AppState::deviceChanged, this, [=] {
-+        pcButton->setEnabled(!s->realtimeInput || p1->cameraSelected());
++        pcButton->setEnabled(cameras->count() && (!s->realtimeInput || p1->cameraSelected()));
 +        phoneButton->setEnabled(!s->realtimeInput || p1->cameraSelected());
 +    });
 +    auto samples = new QWidget;
@@ -612,7 +492,7 @@ index 12f220d..0d1d2b1 100644
      root->setContentsMargins(24, 24, 24, 24);
      root->setSpacing(24);
      auto pair = new CardWidget({}, this, 24);
-@@ -17,7 +83,7 @@ DevicePage::DevicePage(AppState *s, DeviceController *c, QWidget *p)
+@@ -17,7 +110,7 @@ DevicePage::DevicePage(AppState *s, DeviceController *c, QWidget *p)
      pair->body->addWidget(heading);
      pair->body->addWidget(new PairingPlaceholder, 0, Qt::AlignHCenter);
      auto intro = label(
@@ -639,7 +519,7 @@ index a27586d..aac346f 100644
    private:
      AppState *m_state;
 diff --git a/motiondetecter/modules/ui/pages/PlaybackPage.cpp b/motiondetecter/modules/ui/pages/PlaybackPage.cpp
-index f6cd02d..13ce762 100644
+index f6cd02d..82afe17 100644
 --- a/motiondetecter/modules/ui/pages/PlaybackPage.cpp
 +++ b/motiondetecter/modules/ui/pages/PlaybackPage.cpp
 @@ -2,12 +2,14 @@
@@ -721,7 +601,7 @@ index f6cd02d..13ce762 100644
          if (!m_progress->isSliderDown()) {
              QSignalBlocker block(m_progress);
              m_progress->setRange(0, int(d));
-@@ -101,14 +120,76 @@ PlaybackPage::PlaybackPage(AppState *s, SessionController *c, QWidget *p)
+@@ -101,14 +120,80 @@ PlaybackPage::PlaybackPage(AppState *s, SessionController *c, QWidget *p)
          video->setPosition(t, d);
      });
      connect(c, &SessionController::playbackChanged, this, [this](bool playing) {
@@ -746,7 +626,11 @@ index f6cd02d..13ce762 100644
 +            m_progress->setValue(ms);
 +        }
 +        m_time->setText(core::formatDuration(ms) + " / " + core::formatDuration(m_player->duration()));
-+        m_note->setText(QString("源帧 %1 · 采集时间 %2 ms").arg(id).arg(stamp));
++        QString note = QString("源帧 %1 · 采集时间 %2 ms").arg(id).arg(stamp);
++        const auto angles = m_player->anglesDeg();
++        if (angles.contains("leftKnee")) note += QString(" · 左膝 %1°").arg(angles["leftKnee"].toDouble(),0,'f',1);
++        if (angles.contains("rightKnee")) note += QString(" · 右膝 %1°").arg(angles["rightKnee"].toDouble(),0,'f',1);
++        m_note->setText(note);
 +    });
 +    connect(m_player, &RecordingPlayer::playingChanged, this, [this](bool playing) {
 +        m_play->setIcon(icon(playing ? "pause" : "play", Qt::white));
@@ -798,7 +682,7 @@ index f6cd02d..13ce762 100644
  void PlaybackPage::resizeEvent(QResizeEvent *event) {
      QWidget::resizeEvent(event);
      video->setMaximumHeight(qMax(260, qRound((width() - 428) * 461. / 787.)));
-@@ -137,7 +218,10 @@ void PlaybackPage::rebuild() {
+@@ -137,7 +222,10 @@ void PlaybackPage::rebuild() {
          v->addWidget(name);
          v->addWidget(detail);
          m_list->addWidget(b);
@@ -810,7 +694,7 @@ index f6cd02d..13ce762 100644
      }
      if (m_state->sessions.isEmpty())
          m_list->addWidget(label("暂无会话\n可在实时检测页创建样例会话。", true));
-@@ -145,6 +229,7 @@ void PlaybackPage::rebuild() {
+@@ -145,6 +233,7 @@ void PlaybackPage::rebuild() {
      m_count->setText(QString::number(m_state->sessions.size()) + " 条样例");
  }
  void PlaybackPage::refresh() {
@@ -851,7 +735,7 @@ index b2dfcf2..5f2f76e 100644
      void refresh();
  };
 diff --git a/motiondetecter/modules/ui/pages/RealtimePage.cpp b/motiondetecter/modules/ui/pages/RealtimePage.cpp
-index 2d2c0d3..4330745 100644
+index 2d2c0d3..8e7b861 100644
 --- a/motiondetecter/modules/ui/pages/RealtimePage.cpp
 +++ b/motiondetecter/modules/ui/pages/RealtimePage.cpp
 @@ -5,6 +5,11 @@
@@ -874,7 +758,7 @@ index 2d2c0d3..4330745 100644
      hint->setMinimumHeight(116);
      hint->setStyleSheet("QFrame#card{background:#241A06;border-radius:12px;}");
      hint->body->setSpacing(4);
-@@ -122,15 +128,66 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
+@@ -122,15 +128,80 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
      QStringList states = {"站立", "蹲底", "起身"};
      for (int i = 0; i < m_samples.size(); i++)
          source->addItem("交接样例 · " + states.value(i), i);
@@ -898,7 +782,20 @@ index 2d2c0d3..4330745 100644
 +    m_recordResult->hide();
 +    controls->addWidget(m_recordResult);
 +    camera = new CameraStream(this);
-+    connect(camera, &CameraStream::frameReady, this, [this, note](const QImage &img, const QString &, qint64 id, qint64 ms) {
++    connect(realtime, &RealtimeController::poseAccepted, this, [this](const core::PoseResult &pose) {
++        if (!m_recordingCamera || m_captureSession.isEmpty()) return;
++        static const char *const keys[] = {"leftKnee","rightKnee","leftHip","rightHip","trunk",
++            "leftElbow","rightElbow","leftShoulder","rightShoulder","neck","leftAnkle","rightAnkle"};
++        static_assert(sizeof(keys)/sizeof(*keys) == core::kAngleCount);
++        QJsonObject angles;
++        for (int i = 0; i < core::kAngleCount; ++i) {
++            const auto joint = static_cast<core::JointAngle>(i);
++            if (pose.hasAngle(joint)) angles[keys[i]] = pose.angle(joint);
++        }
++        camera->submitAngles(m_captureSession,pose.frameId,pose.timestampMs,angles);
++    });
++    connect(camera, &CameraStream::frameReady, this, [this, note](const QImage &img, const QString &sid, qint64 id, qint64 ms) {
++        m_captureSession = sid;
 +        m_frameId = id;
 +        m_frameTime = ms;
 +        video->showCameraImage(img);
@@ -912,6 +809,7 @@ index 2d2c0d3..4330745 100644
 +        note->setText("请用手机扫码");
 +    });
 +    connect(camera, &CameraStream::captureFailed, this, [this] {
++        m_captureSession.clear();
 +        m_started = false;
 +        m_pairing = {};
 +        emit captureSourceChanged({});
@@ -945,7 +843,7 @@ index 2d2c0d3..4330745 100644
      auto fit = button("", "videoFit");
      fit->setIcon(icon("expand"));
      fit->setToolTip("切换完整画面 / 填满裁剪");
-@@ -139,8 +196,42 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
+@@ -139,11 +210,46 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
      connect(fit, &QPushButton::toggled, video, [this](bool v) { video->setCover(!v); });
      controls->addWidget(fit);
      root->addWidget(footer);
@@ -990,7 +888,11 @@ index 2d2c0d3..4330745 100644
      connect(s, &AppState::deviceChanged, this, &RealtimePage::refresh);
      connect(s, &AppState::detectionChanged, this, &RealtimePage::refresh);
      connect(s, &AppState::configChanged, this, [this, confidenceBar] {
-@@ -151,11 +242,70 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
++        applyCaptureSettings();
+         refresh();
+         confidenceBar->setValue(qRound(m_state->config.confidence * 100));
+     });
+@@ -151,11 +257,94 @@ RealtimePage::RealtimePage(AppState *s, DetectionController *controller,
      connect(realtime, &RealtimeController::changed, this, &RealtimePage::refresh);
      refresh();
  }
@@ -1000,8 +902,12 @@ index 2d2c0d3..4330745 100644
 +    m_record->setEnabled(!m_recordPending && (m_cameraFrame || m_recordingCamera));
 +    m_record->setToolTip("将相机原图编码为 H.264，并保存逐帧时间索引");
 +}
-+void RealtimePage::connectCamera(bool phone) {
++void RealtimePage::connectCamera(bool phone, int deviceIndex) {
 +    if (!m_source->isEnabled()) return;
++    if (!phone && deviceIndex != m_pcIndex) {
++        if (m_sampleIndex == -2) disconnectCamera();
++        m_pcIndex = deviceIndex;
++    }
 +    int index = m_source->findData(phone ? -3 : -2);
 +    if (index < 0) return;
 +    if (m_source->currentIndex() != index) m_source->setCurrentIndex(index);
@@ -1021,7 +927,20 @@ index 2d2c0d3..4330745 100644
 +        emit camera->statusChanged("已停止采集");
 +        emit captureSourceChanged({});
 +    } else {
-+        if (m_sampleIndex == -3) {
++        QString deviceId = QString("usb:%1").arg(m_pcIndex);
++        const bool rtsp = m_sampleIndex == -3 && m_state->config.networkProtocol == "RTSP";
++        if (rtsp) {
++            bool ok = false;
++            const QString address = QInputDialog::getText(window(),"连接网络摄像头","摄像头的 RTSP 地址",
++                                                         QLineEdit::Normal,{},&ok).trimmed();
++            if (!ok || address.isEmpty()) return;
++            const QUrl url(address,QUrl::StrictMode);
++            if (url.scheme()!="rtsp" || !url.isValid() || url.host().isEmpty()) {
++                emit camera->statusChanged("请输入完整的 rtsp:// 摄像头地址");
++                return;
++            }
++            deviceId = address;
++        } else if (m_sampleIndex == -3) {
 +            QStringList addresses;
 +            for (const auto &a : QNetworkInterface::allAddresses())
 +                if (a.protocol() == QAbstractSocket::IPv4Protocol && !a.isLoopback())
@@ -1030,16 +949,23 @@ index 2d2c0d3..4330745 100644
 +            m_phoneHost = QInputDialog::getItem(window(), "手机扫码", "手机可访问的电脑 Wi-Fi 地址",
 +                                                addresses, qMax(0, addresses.indexOf(m_phoneHost)), true, &ok);
 +            if (!ok || m_phoneHost.isEmpty()) return;
++            deviceId = "phone:"+m_phoneHost;
 +        }
 +        m_started = true;
-+        const auto &config = m_state->config;
-+        auto parts = config.resolution.split(QChar(0x00d7));
-+        camera->setCaptureSettings(QSize(parts.value(0).trimmed().toInt(), parts.value(1).trimmed().toInt()),
-+                                   config.fps, config.adaptiveQuality);
-+        emit captureSourceChanged(m_sampleIndex == -3 ? "手机摄像头" : "电脑摄像头");
-+        camera->start(m_sampleIndex == -3 ? QJsonValue("phone") : QJsonValue(0), m_phoneHost);
++        applyCaptureSettings();
++        emit captureSourceChanged(rtsp ? "RTSP 网络摄像头" : m_sampleIndex == -3 ? "手机摄像头" : "电脑摄像头");
++        camera->connectDevice(deviceId);
++        camera->startStream();
 +    }
 +    refresh();
++}
++void RealtimePage::applyCaptureSettings() {
++    const auto &config = m_state->config;
++    const auto parts = config.resolution.split(QChar(0x00d7));
++    const int networkIndex = m_source->findData(-3);
++    if (networkIndex >= 0) m_source->setItemText(networkIndex, config.networkProtocol=="RTSP" ? "RTSP 摄像头" : "手机扫码");
++    camera->setCaptureSettings(QSize(parts.value(0).trimmed().toInt(),parts.value(1).trimmed().toInt()),
++                               config.fps,config.adaptiveQuality);
 +}
  void RealtimePage::refresh() {
 +    const bool live = m_realtime->enabled();
@@ -1062,7 +988,7 @@ index 2d2c0d3..4330745 100644
      if (live)
          pose = m_realtime->pose();
      if (!live) {
-@@ -179,7 +329,8 @@ void RealtimePage::refresh() {
+@@ -179,7 +368,8 @@ void RealtimePage::refresh() {
      const bool kneeValid = pose.hasAngle(core::JointAngle::LeftKnee);
      m_kneeProgress->setValue(kneeValid ? qRound(pose.angle(core::JointAngle::LeftKnee)) : 0);
      m_kneeProgress->setEnabled(kneeValid);
@@ -1072,7 +998,7 @@ index 2d2c0d3..4330745 100644
      video->setReferenceImageEnabled(!live && m_sampleIndex < 0);
      video->setSourceNote(live ? m_realtime->sourceName() + " · 无对应视频帧" : QString());
      for (auto pair : m_angleValues)
-@@ -191,6 +342,19 @@ void RealtimePage::refresh() {
+@@ -191,6 +381,19 @@ void RealtimePage::refresh() {
      video->setAvailable(m_state->connected && m_state->detecting);
      video->setOverlay(m_state->showSkeleton, m_state->showAngles);
      video->setMirror(m_state->config.mirror);
@@ -1092,7 +1018,7 @@ index 2d2c0d3..4330745 100644
      m_detect->setText(live ? (m_state->detecting ? "停止检测" : "开始检测")
                             : (m_state->detecting ? "停止样例" : "开始样例检测"));
      m_detect->setEnabled(m_state->connected);
-@@ -207,18 +371,6 @@ void RealtimePage::refresh() {
+@@ -207,18 +410,6 @@ void RealtimePage::refresh() {
          m_source->addItem(m_realtime->sourceName());
      }
      m_confidenceProgress->setVisible(!live);
@@ -1112,7 +1038,7 @@ index 2d2c0d3..4330745 100644
      polish(m_record);
      m_confidence->setText(live ? "由姿态源配置" : QString::number(m_state->config.confidence, 'f', 2));
 diff --git a/motiondetecter/modules/ui/pages/RealtimePage.h b/motiondetecter/modules/ui/pages/RealtimePage.h
-index eeb64b9..f88b1d5 100644
+index eeb64b9..74be762 100644
 --- a/motiondetecter/modules/ui/pages/RealtimePage.h
 +++ b/motiondetecter/modules/ui/pages/RealtimePage.h
 @@ -1,5 +1,6 @@
@@ -1127,7 +1053,7 @@ index eeb64b9..f88b1d5 100644
      RealtimePage(AppState *, DetectionController *, RealtimeController *, QWidget *parent = nullptr);
      VideoView *video;
 +    CameraStream *camera;
-+    void connectCamera(bool phone);
++    void connectCamera(bool phone, int deviceIndex = 0);
 +    void disconnectCamera();
 +    bool cameraSelected() const { return m_sampleIndex < -1; }
 +    void selectPoseOnly();
@@ -1138,27 +1064,29 @@ index eeb64b9..f88b1d5 100644
  
    private:
      AppState *m_state;
-@@ -26,6 +36,15 @@ class RealtimePage : public QWidget {
+@@ -26,6 +36,17 @@ class RealtimePage : public QWidget {
      QVector<QPair<core::JointAngle, QLabel *>> m_angleValues;
      QVector<core::PoseResult> m_samples;
      int m_sampleIndex = -1;
++    int m_pcIndex = 0;
 +    bool m_started = false;
 +    bool m_cameraFrame = false, m_recordingCamera = false, m_recordPending = false;
 +    QLabel *m_recordResult;
-+    QString m_phoneHost;
++    QString m_phoneHost, m_captureSession;
 +    QImage m_pairing;
 +    QWidget *m_hintCard;
 +    qint64 m_frameId = -1, m_frameTime = -1;
 +    void toggleCamera();
++    void applyCaptureSettings();
 +    void refreshRecordButton();
      void refresh();
  };
  } // namespace ui
 diff --git a/motiondetecter/modules/ui/pages/SettingsPage.cpp b/motiondetecter/modules/ui/pages/SettingsPage.cpp
-index b4b79dc..6cdb675 100644
+index b4b79dc..33f4c7b 100644
 --- a/motiondetecter/modules/ui/pages/SettingsPage.cpp
 +++ b/motiondetecter/modules/ui/pages/SettingsPage.cpp
-@@ -54,17 +54,17 @@ SettingsPage::SettingsPage(AppState *s, SettingsController *c, QWidget *p)
+@@ -54,17 +54,19 @@ SettingsPage::SettingsPage(AppState *s, SettingsController *c, QWidget *p)
      m_fps->setObjectName("captureFps");
      for (int v : {15, 25, 30, 60})
          m_fps->addItem(QString::number(v) + " fps", v);
@@ -1167,24 +1095,27 @@ index b4b79dc..6cdb675 100644
 -    auto degrade = new ToggleField("弱网时自动降低分辨率");
 -    degrade->setEnabled(false);
 -    m_mirror = new ToggleField("镜像参考画面");
-+    auto protocol = label("WebRTC");
++    m_protocol = new QComboBox;
++    m_protocol->setObjectName("networkProtocol");
++    m_protocol->addItems({"WebRTC","RTSP"});
 +    auto degrade = m_adaptive = new ToggleField("手机弱网时降低采集质量");
 +    degrade->setObjectName("cameraAdaptiveQuality");
 +    m_mirror = new ToggleField("镜像画面");
      m_mirror->setObjectName("mirrorVideo");
 -    camera->body->addWidget(row("采集分辨率（样例参数）", m_resolution));
 -    camera->body->addWidget(row("采集帧率（样例参数）", m_fps));
+-    camera->body->addWidget(row("推流协议", protocol));
 +    camera->body->addWidget(row("目标分辨率", m_resolution));
 +    camera->body->addWidget(row("目标帧率", m_fps));
-+    camera->body->addWidget(label("下次启动采集时生效，实测值见设备连接页。", true));
-     camera->body->addWidget(row("推流协议", protocol));
++    camera->body->addWidget(label("预览中应用；录像期间的更改在片段结束后应用。", true));
++    camera->body->addWidget(row("下次网络连接协议", m_protocol));
      camera->body->addWidget(row("弱网时自动降低分辨率", degrade));
 -    camera->body->addWidget(row("镜像参考画面", m_mirror));
 +    camera->body->addWidget(row("镜像预览画面", m_mirror));
      left->addWidget(camera);
      left->addStretch();
      columns->addLayout(left, 1);
-@@ -117,7 +117,7 @@ SettingsPage::SettingsPage(AppState *s, SettingsController *c, QWidget *p)
+@@ -117,15 +119,17 @@ SettingsPage::SettingsPage(AppState *s, SettingsController *c, QWidget *p)
      rightWidget->setFixedWidth(340);
      columns->addWidget(rightWidget);
      root->addLayout(columns, 1);
@@ -1193,37 +1124,44 @@ index b4b79dc..6cdb675 100644
      m_status->setWordWrap(true);
      root->addWidget(m_status);
      scroll->setWidget(content);
-@@ -126,6 +126,7 @@ SettingsPage::SettingsPage(AppState *s, SettingsController *c, QWidget *p)
+     outer->addWidget(scroll);
+     connect(m_resolution, &QComboBox::currentIndexChanged, this, [this] { apply(); });
      connect(m_fps, &QComboBox::currentIndexChanged, this, [this] { apply(); });
++    connect(m_protocol, &QComboBox::currentIndexChanged, this, [this] { apply(); });
      connect(m_threads, &QSpinBox::valueChanged, this, [this] { apply(); });
      connect(m_mirror, &QAbstractButton::toggled, this, [this] { apply(); });
 +    connect(m_adaptive, &QAbstractButton::toggled, this, [this] { apply(); });
      connect(m_path, &QPushButton::clicked, this, [this] {
          auto path = QFileDialog::getExistingDirectory(this, "选择样例文件保存目录",
                                                        m_state->config.storagePath);
-@@ -163,6 +164,7 @@ void SettingsPage::load() {
+@@ -163,6 +167,8 @@ void SettingsPage::load() {
      m_fps->setCurrentIndex(m_fps->findData(m_state->config.fps));
      m_threads->setValue(m_state->config.threads);
      m_mirror->setChecked(m_state->config.mirror);
 +    m_adaptive->setChecked(m_state->config.adaptiveQuality);
++    m_protocol->setCurrentText(m_state->config.networkProtocol);
      QString path = m_state->config.storagePath;
      m_path->setText(QFontMetrics(m_path->font()).elidedText(path, Qt::ElideMiddle, 145));
      m_path->setToolTip(path);
-@@ -176,6 +178,7 @@ void SettingsPage::apply() {
+@@ -176,6 +182,8 @@ void SettingsPage::apply() {
      c.fps = m_fps->currentData().toInt();
      c.threads = m_threads->value();
      c.mirror = m_mirror->isChecked();
 +    c.adaptiveQuality = m_adaptive->isChecked();
++    c.networkProtocol = m_protocol->currentText();
      m_controller->apply(c);
  }
  } // namespace ui
 diff --git a/motiondetecter/modules/ui/pages/SettingsPage.h b/motiondetecter/modules/ui/pages/SettingsPage.h
-index f18648a..c75a17e 100644
+index f18648a..a2ba46a 100644
 --- a/motiondetecter/modules/ui/pages/SettingsPage.h
 +++ b/motiondetecter/modules/ui/pages/SettingsPage.h
-@@ -15,7 +15,7 @@ class SettingsPage : public QWidget {
+@@ -13,9 +13,9 @@ class SettingsPage : public QWidget {
+   private:
+     AppState *m_state;
      SettingsController *m_controller;
-     QComboBox *m_resolution, *m_fps;
+-    QComboBox *m_resolution, *m_fps;
++    QComboBox *m_resolution, *m_fps, *m_protocol;
      QSpinBox *m_threads;
 -    ToggleField *m_mirror;
 +    ToggleField *m_mirror, *m_adaptive;
@@ -1343,7 +1281,7 @@ index d7f89eb..608c7de 100644
      core::PoseResult m_pose;
      bool m_reference = true;
 diff --git a/motiondetecter/tests/ui_tests.cpp b/motiondetecter/tests/ui_tests.cpp
-index de0e1b5..6c8e206 100644
+index de0e1b5..e3da119 100644
 --- a/motiondetecter/tests/ui_tests.cpp
 +++ b/motiondetecter/tests/ui_tests.cpp
 @@ -2,6 +2,9 @@
@@ -1366,7 +1304,7 @@ index de0e1b5..6c8e206 100644
  #include <QSignalSpy>
  #include <QTemporaryDir>
  #include <QtTest>
-@@ -45,6 +51,302 @@ class UiTests : public QObject {
+@@ -45,6 +51,338 @@ class UiTests : public QObject {
              c->onPoseReady(livePose(start + i * 200, angles[i]), token);
      }
    private slots:
@@ -1397,12 +1335,18 @@ index de0e1b5..6c8e206 100644
 +        });
 +        QTest::mouseClick(record, Qt::LeftButton);
 +        QTRY_COMPARE_WITH_TIMEOUT(result["state"].toString(), QString("started"), 10000);
++        const QString token = window.beginRealtimeInput("录像角度联测");
++        connect(page->camera,&CameraStream::frameReady,&window,
++                [&](const QImage &, const QString &, qint64 id,qint64 ms) {
++            window.realtime()->onPoseReady(livePose(ms,92.5f,int(id)),token);
++        });
 +        QTest::qWait(1200);
 +        QTest::mouseClick(record, Qt::LeftButton);
 +        QTRY_COMPARE_WITH_TIMEOUT(result["state"].toString(), QString("finished"), 10000);
 +        const QFileInfo file(result["path"].toString());
 +        QVERIFY(file.size() > 1000);
 +        QVERIFY(result["frames"].toInt() >= 2);
++        QVERIFY(result["framesWithAngles"].toInt() > 0);
 +        QVERIFY(QFile::exists(file.dir().filePath("frames.jsonl")));
 +        QVERIFY(page->findChild<QLabel *>("cameraRecordingResult")->text().contains("打开录像"));
 +        qInfo() << "P1 recorded H.264 frames" << result["frames"].toInt();
@@ -1413,6 +1357,17 @@ index de0e1b5..6c8e206 100644
 +        emit link->linkActivated(QUrl::fromLocalFile(file.absoluteFilePath()).toString());
 +        QCOMPARE(window.currentPage(), PageId::Playback);
 +        QTRY_VERIFY_WITH_TIMEOUT(!decoded.isEmpty(), 10000);
++        QFile index(file.dir().filePath("frames.jsonl"));
++        QVERIFY(index.open(QIODevice::ReadOnly));
++        while (!index.atEnd()) {
++            const auto row = QJsonDocument::fromJson(index.readLine()).object();
++            if (row["anglesDeg"].toObject().contains("leftKnee")) {
++                player->seek(int((row["pts"].toInteger()+89)/90));
++                QTRY_COMPARE_WITH_TIMEOUT(player->anglesDeg().value("leftKnee").toDouble(),92.5,5000);
++                return;
++            }
++        }
++        QFAIL("No indexed knee angle");
 +    }
 +    void recordingSeekPauseAndResume() {
 +        QString path = qEnvironmentVariable("POSELAB_TEST_RECORDING");
@@ -1515,7 +1470,26 @@ index de0e1b5..6c8e206 100644
 +        qInfo().noquote() << "P2 received" << frames.count() << "frames;" << metrics->text();
 +        const QSize size = qvariant_cast<QImage>(frames.last().first()).size();
 +        QVERIFY(metrics->text().startsWith(QString("%1 × %2").arg(size.width()).arg(size.height())));
-+        if (!phone) QCOMPARE(size, QSize(640,480));
++        if (phone && qEnvironmentVariableIsSet("POSELAB_PHONE_LIVE_SETTINGS")) {
++            const auto sid = frames.last().at(1).toString();
++            window.findChild<QComboBox *>("captureResolution")->setCurrentText("1280 × 720");
++            fps->setCurrentIndex(fps->findData(30));
++            QTRY_VERIFY_WITH_TIMEOUT(qMax(camera->deviceInfo().resolution.width(),
++                                          camera->deviceInfo().resolution.height()) >= 1000,30000);
++            frames.clear();
++            QTRY_VERIFY_WITH_TIMEOUT(frames.count() >= 60,15000);
++            QCOMPARE(frames.last().at(1).toString(),sid);
++            qInfo().noquote() << "Phone after P6 change:" << metrics->text();
++        } else if (!phone) {
++            QCOMPARE(size,QSize(640,480));
++            const auto session = frames.last().at(1).toString();
++            window.navigate(PageId::Settings);
++            window.findChild<QComboBox *>("captureResolution")->setCurrentText("1280 × 720");
++            QTRY_VERIFY_WITH_TIMEOUT(camera->deviceInfo().resolution == QSize(1280,720),8000);
++            QCOMPARE(frames.last().at(1).toString(),session);
++            qInfo() << "P6 live resize without restart:" << camera->deviceInfo().resolution;
++            window.navigate(PageId::Devices);
++        }
 +        window.findChild<QPushButton *>("liveDisconnectDevice")->click();
 +        QCOMPARE(window.findChild<QLabel *>("liveDeviceName")->text(), QString("未连接"));
 +        QCOMPARE(metrics->text(), QString("—"));
@@ -1669,7 +1643,7 @@ index de0e1b5..6c8e206 100644
      void realtimeStagesCountAndPageShareInput() {
          QTemporaryDir dir;
          MainWindow w(dir.path());
-@@ -474,7 +776,7 @@ class UiTests : public QObject {
+@@ -474,7 +812,7 @@ class UiTests : public QObject {
          MainWindow w(dir.path());
          auto source = w.findChild<QComboBox *>("poseSampleSource");
          QVERIFY(source);

@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from collections import deque
 from pathlib import Path
+from urllib.parse import urlsplit
 import threading
 import time
 import uuid
@@ -13,6 +14,13 @@ import numpy as np
 
 from .interface import (CaptureConfig, PreprocessConfig, FramePacket, FrameReadResult,
                         CameraStats, transform_points, validate_read)
+
+
+def is_rtsp_source(source):
+    if not isinstance(source, str) or not source.lower().startswith("rtsp://"):
+        return False
+    address = urlsplit(source)
+    return bool(address.hostname and (address.port is None or 0 < address.port <= 65535))
 
 
 def preprocess(bgr: np.ndarray, config: PreprocessConfig):
@@ -98,6 +106,7 @@ class CameraEngine:
         self._condition = threading.Condition(threading.RLock())
         self._stop = threading.Event()
         self._thread = None
+        self._capture_target = CaptureConfig()
         self._recording = None
         self._latest = None
         self._sequence = 0
@@ -181,11 +190,13 @@ class CameraEngine:
         capture.validate()
         if not ((type(source) is int and source >= 0) or (isinstance(source, str) and source)):
             raise ValueError("输入源必须为非负摄像头编号、视频文件路径或 demo")
-        if isinstance(source, str) and source != "demo" and not Path(source).is_file():
+        network = is_rtsp_source(source)
+        if isinstance(source, str) and source != "demo" and not network and not Path(source).is_file():
             raise ValueError("视频文件不存在")
         self.stop()
         self._stop.clear()
-        session = self._new_session(str(source), "opening")
+        session = self._new_session("RTSP" if network else str(source), "opening")
+        self._capture_target = capture
         self._thread = threading.Thread(target=self._capture_loop, args=(source, capture, session), daemon=True)
         self._thread.start()
 
@@ -238,11 +249,20 @@ class CameraEngine:
             self._condition.notify_all()
             return packet
 
+    def set_capture_target(self, capture):
+        capture.validate()
+        with self._condition:
+            self._capture_target = capture
+
     def _capture_loop(self, source, capture, session):
         cap = None
+        network = is_rtsp_source(source)
+        video_file = isinstance(source, str) and source != "demo" and not network
         try:
             if source != "demo":
-                cap = cv2.VideoCapture(source)
+                cap = (cv2.VideoCapture(source,cv2.CAP_FFMPEG,[cv2.CAP_PROP_OPEN_TIMEOUT_MSEC,2500,
+                                                               cv2.CAP_PROP_READ_TIMEOUT_MSEC,2000])
+                       if network else cv2.VideoCapture(source))
                 if not cap.isOpened():
                     raise RuntimeError("无法打开摄像头或视频。请检查设备编号、权限及是否被其他程序占用。")
                 if isinstance(source, int):
@@ -251,17 +271,27 @@ class CameraEngine:
                     cap.set(cv2.CAP_PROP_FPS, capture.fps)
                     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             rate = capture.fps
-            if isinstance(source, str) and source != "demo":
+            if video_file:
                 file_rate = cap.get(cv2.CAP_PROP_FPS)
                 rate = file_rate if 1 <= file_rate <= 120 else capture.fps
             index, deadline = 0, time.monotonic()
             while not self._stop.is_set():
+                with self._condition:
+                    desired = self._capture_target
+                if desired != capture and (source == "demo" or isinstance(source, int)):
+                    capture = desired
+                    if cap is not None:
+                        cap.set(cv2.CAP_PROP_FRAME_WIDTH, capture.width)
+                        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, capture.height)
+                        cap.set(cv2.CAP_PROP_FPS, capture.fps)
+                    rate = capture.fps
+                    deadline = time.monotonic()
                 if source == "demo":
                     bgr, media_time = demo_frame(index, capture.width, capture.height), index / rate
                 else:
                     ok, bgr = cap.read()
                     if not ok:
-                        if isinstance(source, str):
+                        if video_file:
                             if index == 0:
                                 raise RuntimeError("视频没有可解码的图像帧，请检查文件是否损坏或编码是否支持")
                             with self._condition:
@@ -270,7 +300,7 @@ class CameraEngine:
                                     self._condition.notify_all()
                             return
                         raise RuntimeError("摄像头读取失败，请检查连接后重新开始")
-                    media_time = cap.get(cv2.CAP_PROP_POS_MSEC)/1000 if isinstance(source, str) else None
+                    media_time = cap.get(cv2.CAP_PROP_POS_MSEC)/1000 if video_file else None
                 self.ingest(bgr, session, media_time)
                 index += 1
                 deadline = max(deadline + 1 / rate, time.monotonic())
@@ -298,6 +328,12 @@ class CameraEngine:
             self._recording = Recording(directory, self._latest)
             self._recording.offer(self._latest)
             return self._recording.id
+
+    def submit_recording_angles(self, recording_id, session, frame_id, timestamp_ms, angles):
+        with self._condition:
+            recording = self._recording
+        return bool(recording and recording.submit_angles(recording_id, session, frame_id,
+                                                          timestamp_ms, angles))
 
     def recording_finished(self):
         with self._condition:

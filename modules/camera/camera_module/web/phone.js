@@ -78,21 +78,48 @@ function scheduleReconnect(message = "视频连接中断") {
   status(`${message}，正在重连（${retries}/3）…`);
   reconnectTimer = setTimeout(() => connect(generation), 1000 * 2 ** retries);
 }
+let telemetryBusy = false, batteryInfo = null, settingsRevision = 0;
 async function updateStats() {
   if (!stream) return;
   const settings = stream.getVideoTracks()[0]?.getSettings();
   if (settings) $("details").textContent = `实际采集 ${settings.width || "—"} × ${settings.height || "—"} · ${Math.round(settings.frameRate || 0)} 帧/秒`;
-  if (!pc || pc.connectionState !== "connected" || !$("adaptive").checked || Date.now()-lastAdapt < 15000) return;
+  if (!pc || pc.connectionState !== "connected" || !session || telemetryBusy) return;
+  const peer = pc, sid = session;
+  telemetryBusy = true;
   try {
-    const report = await pc.getStats(); let weak = false;
-    report.forEach(s => { if (s.type === "remote-inbound-rtp" && s.kind === "video" && (s.fractionLost > .08 || s.roundTripTime > .3)) weak = true; });
-    if (weak && settings.height > 480) {
+    const report = await peer.getStats(); let weak = false, rttMs = null;
+    report.forEach(s => {
+      if (s.type !== "remote-inbound-rtp" || s.kind !== "video") return;
+      if (Number.isFinite(s.roundTripTime)) rttMs = Math.round(1000*s.roundTripTime);
+      if (s.fractionLost > .08 || s.roundTripTime > .3) weak = true;
+    });
+    if (batteryInfo === null) batteryInfo = navigator.getBattery ? navigator.getBattery().catch(() => null) : Promise.resolve(null);
+    const battery = await batteryInfo;
+    if (peer !== pc || sid !== session) return;
+    const response = await request("/telemetry", {session:sid, rttMs, battery:battery ? Math.round(100*battery.level) : null});
+    if (peer !== pc || sid !== session) return;
+    const target = response.streamSettings;
+    if (target && target.revision !== settingsRevision) {
+      await stream.getVideoTracks()[0].applyConstraints({width:{ideal:target.width},height:{ideal:target.height},
+        frameRate:{ideal:target.fps,max:target.fps}});
+      presets.desktop = {width:target.width,height:target.height,frameRate:target.fps};
+      let option = Array.from($("quality").options).find(o => o.value === "desktop");
+      if (!option) { option = new Option("", "desktop"); $("quality").add(option); }
+      option.text = "电脑设置 · " + target.width + "×" + target.height + " · " + target.fps + " fps";
+      $("quality").value = "desktop";
+      $("adaptive").checked = target.adaptive;
+      settingsRevision = target.revision;
+      lastAdapt = Date.now();
+      return;
+    }
+    if (weak && $("adaptive").checked && Date.now()-lastAdapt >= 15000 && Math.max(settings.width,settings.height)>854) {
       lastAdapt = Date.now();
       const limit = Math.min(20, presets[$("quality").value].frameRate);
       await stream.getVideoTracks()[0].applyConstraints({width:{ideal:Math.min(854,settings.width)},height:{ideal:480},frameRate:{ideal:limit,max:limit}});
       status("检测到网络波动，已请求降低采集质量。实际效果取决于手机支持情况。");
     }
   } catch (_) { /* Browser statistics and constraint support vary. */ }
+  finally { telemetryBusy = false; }
 }
 async function start() {
   if (active) return;

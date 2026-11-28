@@ -47,3 +47,30 @@ class PlaybackTests(unittest.TestCase):
             index.write_text("\n".join([rows[0], rows[0], *rows[2:]]))
             with self.assertRaises(ValueError):
                 IndexedRecording(path)
+
+    def test_recorded_angles_follow_source_frame_after_seek(self):
+        with tempfile.TemporaryDirectory() as tmp, CameraEngine(PreprocessConfig(32, 32)) as engine:
+            sid = engine.start_external()
+            image = np.zeros((32, 32, 3), np.uint8)
+            engine.ingest(image, sid)
+            rid = engine.start_recording(tmp)
+            time.sleep(.015)
+            target = engine.ingest(image, sid)
+            ms = round((target.monotonic_at-target.session_started_at)*1000)
+            angles = {"leftKnee": 82.5}
+            self.assertFalse(engine.submit_recording_angles(rid, "other", target.frame_id, ms, angles))
+            self.assertFalse(engine.submit_recording_angles("old", sid, target.frame_id, ms, angles))
+            self.assertFalse(engine.submit_recording_angles(rid, sid, target.frame_id, ms, {"leftKnee": 999}))
+            time.sleep(.015)
+            engine.ingest(image, sid)
+            self.assertTrue(engine.submit_recording_angles(rid, sid, target.frame_id, ms, angles))
+            result = engine.stop_recording()
+            self.assertEqual(result["framesWithAngles"], 1)
+            self.assertFalse(engine.submit_recording_angles(rid, sid, target.frame_id, ms, angles))
+            recording = IndexedRecording(result["path"])
+            try:
+                for position in (2, 1, 0, 1):
+                    _, meta = recording.at((recording.pts[position]+89)//90)
+                    self.assertEqual(meta["anglesDeg"], angles if position==1 else {})
+            finally:
+                recording.container.close()

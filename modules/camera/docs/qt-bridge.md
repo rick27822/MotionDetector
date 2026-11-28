@@ -1,5 +1,13 @@
 # 接收 4.2 的真实相机帧
 
+## 标准 C++ 接口与构建
+
+队友通过 [ICameraSource.h](../native/ICameraSource.h) 使用 CameraManager。Qt 6 和 OpenCV 4 的 core 库须使用兼容的 C++ 工具链。将完整相机目录放在仓库根目录的 modules/camera 下，然后应用本页的 UI 补丁。也可用 CMake 参数 POSELAB_CAMERA_NATIVE_DIR 指定 native 目录，OpenCV_DIR 指向包含 OpenCVConfig.cmake 的目录。独立示例的构建入口为 native/CMakeLists.txt；运行 camera_contract_example 默认使用合成输入，加 --pc 则枚举并打开实体摄像头。
+
+frameReady 提供引用计数的 BGR cv::Mat 和单调毫秒。sourceFrameReady 额外提供会话和源帧号。慢速推理线程使用 LatestCameraFrame 的 available 通知和 takeLatest 读取最新帧。grabFrameForQR 返回当前原图，pairingReady 返回供手机扫描的配对码。discoverDevices 枚举本机摄像头和手机扫码入口。WebRTC 手机报告网络往返时间和浏览器允许读取的电量，不可用时返回 -1。
+
+录像的 frames.jsonl 新增 anglesDeg，按帧号和毫秒匹配，单位为度；缺失结果写空对象。recording.json 的 framesWithAngles 是成功关联角度的帧数。P4 支持旧录像，并显示当前帧已记录的左右膝角。
+
 ## 六页主程序中的 P1 联调
 
 相机代码在 camera-4.2，主程序基于陈柯睿分支 feat/chenkerui-ui-stage1 的提交 823175a。随附的 [主程序接入补丁](p1-ui.patch) 包含 P1、P2、P4 和 P6 的改动。请在该版本的仓库根目录用 `git apply --check <补丁路径>` 检查，再用 `git apply <补丁路径>` 应用。相机模块需单独安装 Python 依赖。
@@ -8,7 +16,7 @@
 
 2026-11-27 在 Windows、Qt 6.8 上对该版本运行界面测试，29 项通过。P1 两次开启电脑摄像头，分别绘制 30 帧和 31 帧 1280×720 画面；核对渲染像素、停止及重启后的会话变化。通过主程序回放团队的 12 次合成姿态样例，计数为 12、丢帧为 0。本轮实体手机仅在此前的独立 Qt 预览窗口验证。P1 相机画面和姿态文件回放各自验证；真人骨架与计数等待真实推理模块。
 
-给姿态模块的图像入口是 ui::CameraStream::frameReady(image, sessionId, sourceFrameId, timestampMs)。保留源帧信息，以便将姿态对应回相同画面。实时姿态结果的消费入口及会话 token 约定见 UI 分支的 docs/P1实时提示联调交接.md。
+姿态模块通过 `camera::ICameraSource::sourceFrameReady(bgr, sessionId, sourceFrameId, timestampMs)` 取得原图和帧标识。Qt 页面可继续用 `ui::CameraStream::frameReady` 显示共享像素的 QImage。实时姿态结果的消费入口和会话 token 约定见 UI 分支的 docs/P1实时提示联调交接.md。
 
 实时联调时先在 P1 或 P2 启动相机。收到新采集会话的第一帧时，在主界面线程调用一次 `MainWindow::beginRealtimeInput("实时姿态")`，保存返回的姿态会话 token。把这个 token 与原图、源帧号和时间戳一起交给推理任务。推理完成后，将源帧号写入 `PoseResult.frameId`，将采集时间原样写入 `PoseResult.timestampMs`，用 `RealtimeController::submitPose(result, token)` 返回结果。工作线程应使用发起任务时的 token，采集重连后的新会话需要重新绑定。
 
@@ -20,7 +28,7 @@ P1 持续显示相机画面和录像按钮。侧栏显示姿态模块最近的�
 
 ## 从 P2 连接相机，在 P6 设置参数
 
-1. 在 P6「摄像头与推流」选择目标分辨率、目标帧率和手机弱网降质开关。选择后自动保存，在下一次启动采集时生效。
+1. 在 P6 选择采集目标。电脑预览时应用，WebRTC 手机在下次设备统计交互时请求新参数。录像期间延后至片段结束。网络协议用于下次连接，RTSP 需要摄像头提供的地址，实际编码尺寸由发送端控制。
 2. 在 P2「相机连接」点「连接电脑摄像头」，或点「连接手机」并选择电脑的 Wi-Fi 地址。手机连同一局域网，扫码后保留「电脑设置」预设，允许摄像头权限并开始推流。
 3. P2 显示收到的图像尺寸和电脑端按收帧时间计算的帧率。设备支持的模式、手机方向及网络会影响实测值。切换到 P1 可预览或录制同一会话。从任一页停止采集会同时停止两页的数据。
 
@@ -46,7 +54,7 @@ P1 持续显示相机画面和录像按钮。侧栏显示姿态模块最近的�
 
 在 P1 完成录制后点「打开录像」，主程序会切换到 P4。也可以在 P4 点「打开本地录像」，选择同一录制目录中的 video.mp4 或 recording.json。移动或分享录像时保留整个目录，包括 frames.jsonl。命令行可用 `motiondetecter --recording <video.mp4 的路径>` 直接打开。
 
-播放、暂停、进度条与 0.5× 至 2× 倍速共用原页面的控件。页面显示当前解码图像的源帧号及它在采集会话中的时间。拖动时选取显示时间不晚于目标位置的最后一帧，按视频 PTS 与逐帧索引匹配。切换右侧样例会话可回到合成角度时间轴。真实录像当前提供视频和取帧元数据，逐帧姿态需另行接入。
+播放、暂停、进度条与 0.5× 至 2× 倍速共用原页面的控件。页面显示当前解码图像的源帧号及它在采集会话中的时间。拖动时选取显示时间不晚于目标位置的最后一帧，按视频 PTS 与逐帧索引匹配。切换右侧样例会话可回到合成角度时间轴。录像中有已关联的膝角时，P4 会按当前解码帧显示度数；旧录像或缺少姿态的帧只显示源帧信息。
 
 解码进程 playback_runner.py 与 camera_runner.py 位于同一目录，共用同一个 Python 环境及 PyAV 依赖。
 
